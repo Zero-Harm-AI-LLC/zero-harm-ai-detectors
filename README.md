@@ -21,7 +21,7 @@ pip install zero-harm-ai-detectors
 ### PII Detection and Redaction
 
 ```python
-from zero_harm_detectors import detect_pii, redact_text
+from detectors import detect_pii, redact_text
 
 text = "Contact John Doe at john.doe@email.com or call 555-123-4567"
 
