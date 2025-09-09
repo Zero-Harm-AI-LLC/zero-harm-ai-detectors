@@ -36,11 +36,11 @@ Repository = "https://github.com/Zero-Harm-AI-LLC/zero-harm-ai-detectors"
 Issues = "https://github.com/Zero-Harm-AI-LLC/zero-harm-ai-detectors/issues"
 
 [tool.setuptools.dynamic]
-version = {attr = "zero_harm_detectors.__version__"}
+version = {attr = "detectors.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["zero_harm_detectors*"]
+include = ["detectors*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

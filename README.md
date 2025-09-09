@@ -13,7 +13,7 @@ A comprehensive Python library for detecting and redacting personally identifiab
 ## Installation
 
 ```bash
-pip install zero-harm-ai-detectors
+pip install zero-harm-detectors
 ```
 
 ## Quick Start

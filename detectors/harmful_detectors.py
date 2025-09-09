@@ -1,4 +1,4 @@
-# file: harmful_text_detector.py
+# file: harmful_detectors.py
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List
