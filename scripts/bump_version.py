@@ -11,12 +11,12 @@ from pathlib import Path
 
 def get_current_version():
     """Get current version from __init__.py"""
-    init_file = Path("zero_harm_detectors/__init__.py")
+    init_file = Path("detectors/__init__.py")  # Fixed path
     content = init_file.read_text()
     match = re.search(r'__version__ = "([^"]+)"', content)
     if match:
         return match.group(1)
-    raise ValueError("Could not find version in __init__.py")
+    raise ValueError("Could not find version in detectors/__init__.py")
 
 def bump_version(current_version, bump_type):
     """Bump version based on type"""
@@ -38,7 +38,7 @@ def bump_version(current_version, bump_type):
 
 def update_version_in_file(new_version):
     """Update version in __init__.py"""
-    init_file = Path("zero_harm_detectors/__init__.py")
+    init_file = Path("detectors/__init__.py")  # Fixed path
     content = init_file.read_text()
     new_content = re.sub(
         r'__version__ = "[^"]+"',

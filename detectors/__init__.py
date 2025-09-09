@@ -17,7 +17,7 @@ from .detectors import (
     RedactionStrategy
 )
 
-from .harmful_detector import (
+from .harmful_detectors import (
     HarmfulTextDetector,
     DetectionConfig
 )
