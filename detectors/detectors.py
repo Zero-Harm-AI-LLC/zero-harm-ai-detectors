@@ -144,71 +144,56 @@ class PersonNameDetector(BaseDetector):
     type = "PERSON_NAME"
 
     # Pattern that requires at least the first name part to be capitalized
-    # This catches "Susan wang", "Susan Wang", but avoids "my email" 
     NAME = re.compile(
         r"(?:Name:\s*)?\b([A-Z][a-zA-Z]{1,}\s+[a-zA-Z]{1,}(?:\s+[a-zA-Z]{1,})?)\b"
     )
     
-    # Extended exclusions: common non-person suffixes and words
+    # More conservative exclusions - only obvious non-names
     EXCLUDES = {
-        # Address components
-        "Street", "Avenue", "Road", "Company", "Corp", "LLC", "Inc", "St", "Rd", "Dr", "Ln",
-        "Blvd", "Boulevard", "Lane", "Court", "Circle", "Way", "Place", "Terrace", "Trail",
-        "Highway", "Parkway", "Pkwy", "Pl", "Ter", "Trl", "Hwy",
-        # Directions
-        "NE", "NW", "SE", "SW", "N", "S", "E", "W", "North", "South", "East", "West",
-        # Common phrases/salutations
-        "Dear Sir", "Dear Madam", "Thank You", "Best Regards", "Kind Regards", 
-        "Yours Truly", "Very Truly", "Sincerely Yours",
-        # Days and months
+        # Address/business components (only endings)
+        "Street", "Avenue", "Road", "Company", "Corp", "LLC", "Inc", 
+        "Boulevard", "Lane", "Court", "Circle", "Way", "Place", "Highway",
+        # Directions (only endings)  
+        "North", "South", "East", "West",
+        # Days and months (only endings)
         "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
         "January", "February", "March", "April", "May", "June", "July", "August", 
         "September", "October", "November", "December",
-        # Common words that aren't names
-        "My", "The", "This", "That", "His", "Her", "Our", "Your", "Their"
     }
     
-    # Patterns that indicate non-name content - keep this minimal
+    # Patterns that indicate non-name content
     NON_NAME_PATTERNS = [
-        re.compile(r"\bMy\s+[Nn]ame\s+[Ii]s\b", re.I),   # "My name is" phrase
-        re.compile(r"\bMy\s+Email\s+Is\b", re.I),        # "My Email Is" phrase  
-        re.compile(r"\bThe\s+Email\s+Is\b", re.I),       # "The Email Is" phrase
-        re.compile(r"\bEmail\s+Address\s+Is\b", re.I),   # "Email Address Is" phrase
-        re.compile(r"\b(?:His|Her|Their)\s+[Nn]ame\s+[Ii]s\b", re.I), # "His/Her/Their name is"
+        re.compile(r"\bMy\s+[Nn]ame\s+[Ii]s\b", re.I),
+        re.compile(r"\bEmail\s+[Aa]ddress\s*:?\s*", re.I),
+        re.compile(r"\bEmail\s*:?\s*", re.I),
     ]
 
     def finditer(self, text: str) -> Iterable[Tuple[int, int]]:
         for m in self.NAME.finditer(text):
             value = m.group(1).strip()
+            start, end = m.start(1), m.end(1)
             
-            # Skip if it matches non-name patterns (like "My Name Is")
+            # Skip if it matches non-name patterns in the surrounding context
+            context = self._context(text, start, end, window=20)
             skip_match = False
             for pattern in self.NON_NAME_PATTERNS:
-                if pattern.search(value):
+                if pattern.search(context):
                     skip_match = True
                     break
             if skip_match:
                 continue
             
-            # Skip if ends with excluded tokens
+            # Only skip if the LAST word is clearly an excluded term
             words = value.split()
-            if any(words[-1] == x for x in self.EXCLUDES):
+            if len(words) >= 2 and words[-1] in self.EXCLUDES:
                 continue
                 
-            # Skip if any word is in excludes (case-insensitive)
-            if any(word in self.EXCLUDES for word in words):
-                continue
-
-            # Skip if looks like an address context
-            start, end = m.start(1), m.end(1)
-            ctx = self._context(text, start, end)
-            
-            # Check for address indicators
-            if re.search(r"\b\d{5}\b", ctx) or re.search(r"\b(?:Street|St|Avenue|Ave|Road|Rd|Oregon|CA|NY|TX)\b", ctx, re.I):
+            # Skip obvious address context (be more specific)
+            if re.search(r"\b\d{3,5}\s+\w+\s+(Street|St|Avenue|Ave|Road|Rd|Blvd|Lane|Ln|Drive|Dr)\b", context, re.I):
                 continue
                 
-            # Check for email/contact context (but allow "name is" contexts since those contain real names)
-            if re.search(r"\b(?:email|@|contact|phone|address|call|write)\b", ctx, re.I):
+            # Skip if surrounded by obvious email context
+            if re.search(r"@\w+\.\w+|email\s*:|contact\s*information", context, re.I):
                 continue
 
             yield (start, end)
