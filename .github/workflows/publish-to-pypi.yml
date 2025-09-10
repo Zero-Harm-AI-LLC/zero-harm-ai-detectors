@@ -115,6 +115,15 @@ jobs:
       run: |
         VERSION=${GITHUB_REF#refs/tags/v}
         echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+        echo "Extracted version: $VERSION"
+    
+    - name: Debug Repository Dispatch
+      run: |
+        echo "Triggering repository dispatch for:"
+        echo "Repository: Zero-Harm-AI-LLC/zero-harm-ai-backend"
+        echo "Event Type: library-updated"
+        echo "Version: ${{ steps.version.outputs.VERSION }}"
+        echo "Library Name: zero-harm-ai-detectors"
     
     - name: Wait for PyPI propagation
       run: |
@@ -122,6 +131,7 @@ jobs:
         sleep 120
     
     - name: Trigger Backend Update
+      id: dispatch
       uses: peter-evans/repository-dispatch@v2
       with:
         token: ${{ secrets.BACKEND_REPO_TOKEN }}
@@ -132,3 +142,9 @@ jobs:
             "library_version": "${{ steps.version.outputs.VERSION }}",
             "library_name": "zero-harm-ai-detectors"
           }
+    
+    - name: Verify Dispatch Success
+      run: |
+        echo "✅ Repository dispatch sent successfully"
+        echo "Check the backend repository Actions tab for the triggered workflow"
+        echo "Backend repo: https://github.com/Zero-Harm-AI-LLC/zero-harm-ai-backend/actions"
