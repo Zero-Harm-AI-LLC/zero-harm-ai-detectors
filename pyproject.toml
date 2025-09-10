@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=61.0", "wheel", "setuptools-scm>=6.2"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -15,7 +15,6 @@ requires-python = ">=3.8"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
@@ -25,7 +24,7 @@ classifiers = [
 ]
 dependencies = [
     "transformers>=4.20.0",
-    "torch>=1.12.0",
+    "torch>=1.12.0", 
     "regex>=2022.1.18",
     "numpy>=1.21.0",
 ]
@@ -35,12 +34,12 @@ Homepage = "https://github.com/Zero-Harm-AI-LLC/zero-harm-ai-detectors"
 Repository = "https://github.com/Zero-Harm-AI-LLC/zero-harm-ai-detectors"
 Issues = "https://github.com/Zero-Harm-AI-LLC/zero-harm-ai-detectors/issues"
 
-[tool.setuptools.dynamic]
-version = {attr = "detectors.__version__"}
-
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["detectors*"]
+
+[tool.setuptools_scm]
+write_to = "detectors/_version.py"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

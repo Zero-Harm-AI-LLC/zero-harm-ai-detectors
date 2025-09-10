@@ -203,6 +203,20 @@ for match in phone_detector.finditer(text):
 4. Run tests: `pytest`
 5. Submit a pull request
 
+### Make your changes and commit
+```bash
+git add .
+git commit -m "Add new feature"
+```
+### Create version tag
+```bash
+git tag v0.1.0
+```
+### Push with tags
+```bash
+git push origin main --tags
+```
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
