@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2025-01-XX
+
+### Changed
+- **BREAKING**: Renamed package from `zero-harm-ai-detectors` to `zero_harm_ai_detectors` for consistent import paths
+- Import path changed from `from detectors import ...` to `from zero_harm_ai_detectors import ...`
+- Fixed package naming confusion between PyPI name and Python import name
+
+### Fixed
+- Resolved import issues in backend integration
+- Updated all documentation examples with correct import 
+
 ## [0.1.0] - 2024-XX-XX
 
 ### Added
