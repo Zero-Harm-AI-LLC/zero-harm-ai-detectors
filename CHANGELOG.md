@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.1] - 2025-01-XX
+## [0.1.2] - 2025-01-XX
 
 ### Changed
 - **BREAKING**: Renamed package from `zero-harm-ai-detectors` to `zero_harm_ai_detectors` for consistent import paths
@@ -17,6 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Resolved import issues in backend integration
 - Updated all documentation examples with correct import 
+
+## [0.1.1] - 2025-01-XX
+
+### Changed
+- Minor changes to used with the backend
+
+### Fixed
+- Resolved import issues in backend integration
 
 ## [0.1.0] - 2024-XX-XX
 
