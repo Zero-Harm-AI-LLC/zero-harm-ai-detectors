@@ -100,7 +100,7 @@ jobs:
           ## Installation
           
           ```bash
-          pip install zero-harm-ai-detectors==${{ steps.version.outputs.VERSION }}
+          pip install zero_harm_ai_detectors==${{ steps.version.outputs.VERSION }}
           ```
         draft: false
         prerelease: false
@@ -123,7 +123,7 @@ jobs:
         echo "Repository: Zero-Harm-AI-LLC/zero-harm-ai-backend"
         echo "Event Type: library-updated"
         echo "Version: ${{ steps.version.outputs.VERSION }}"
-        echo "Library Name: zero-harm-ai-detectors"
+        echo "Library Name: zero_harm_ai_detectors"
     
     - name: Wait for PyPI propagation
       run: |
@@ -140,7 +140,7 @@ jobs:
         client-payload: |
           {
             "library_version": "${{ steps.version.outputs.VERSION }}",
-            "library_name": "zero-harm-ai-detectors"
+            "library_name": "zero_harm_ai_detectors"
           }
     
     - name: Verify Dispatch Success

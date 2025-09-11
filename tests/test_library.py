@@ -4,11 +4,11 @@ Test script to verify the library works
 """
 
 def test_library():
-    print("Testing zero-harm-ai-detectors library...")
+    print("Testing zero_harm_ai_detectors library...")
     
     try:
         # Test imports
-        from detectors import detect_pii, detect_secrets, HarmfulTextDetector, DetectionConfig
+        from zero_harm_ai_detectors import detect_pii, detect_secrets, HarmfulTextDetector, DetectionConfig  # Changed import
         print("✅ Imports successful")
         
         # Test PII detection

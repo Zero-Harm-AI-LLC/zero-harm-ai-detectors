@@ -1,3 +1,4 @@
+### 5. Update tests/test_detectors.py
 import pytest
 import sys
 import os
@@ -5,7 +6,7 @@ import os
 # Add the parent directory to the path so we can import our module
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from detectors import detect_pii, detect_secrets, HarmfulTextDetector, DetectionConfig
+from zero_harm_ai_detectors import detect_pii, detect_secrets, HarmfulTextDetector, DetectionConfig  # Changed import
 
 def test_detects_email_and_ssn():
     """Test that email and SSN detection works"""
@@ -81,5 +82,3 @@ def test_detection_config_custom():
     assert config.threshold_per_label == 0.7
     assert config.overall_threshold == 0.8
     assert config.threat_min_score_on_cue == 0.9
-
-# Note: More tests can be added for HarmfulTextDetector, but they may require

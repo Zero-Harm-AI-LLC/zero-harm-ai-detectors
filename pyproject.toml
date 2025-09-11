@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0", "wheel", "setuptools-scm>=6.2"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "zero-harm-ai-detectors"
+name = "zero_harm_ai_detectors"  # Changed: removed hyphens
 dynamic = ["version"]
 description = "Privacy and harmful content detection library"
 authors = [
@@ -36,10 +36,10 @@ Issues = "https://github.com/Zero-Harm-AI-LLC/zero-harm-ai-detectors/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["detectors*"]
+include = ["zero_harm_ai_detectors*"]  # Changed: match new package name
 
 [tool.setuptools_scm]
-write_to = "detectors/_version.py"
+write_to = "zero_harm_ai_detectors/_version.py"  # Changed: match new folder name
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
