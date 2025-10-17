@@ -10,14 +10,19 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from zero_harm_ai_detectors import (
-    ZeroHarmPipeline,
-    PipelineConfig,
-    RedactionStrategy,
+    AI_DETECTION_AVAILABLE,
     detect_all_threats,
     detect_pii,
     detect_secrets,
-    AI_DETECTION_AVAILABLE
 )
+
+# Only import AI-specific classes if available
+if AI_DETECTION_AVAILABLE:
+    from zero_harm_ai_detectors import (
+        ZeroHarmPipeline,
+        PipelineConfig,
+        RedactionStrategy,
+    )
 
 
 @pytest.fixture
@@ -46,6 +51,7 @@ def test_texts():
 
 
 # ==================== Basic Detection Tests ====================
+@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
 def test_email_detection(pipeline, test_texts):
     """Test email detection"""
     result = pipeline.detect(test_texts["email"])
@@ -56,6 +62,7 @@ def test_email_detection(pipeline, test_texts):
     assert "john.smith@example.com" in email_dets[0].text
 
 
+@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
 def test_phone_detection(pipeline, test_texts):
     """Test phone number detection"""
     result = pipeline.detect(test_texts["phone"])
@@ -65,6 +72,7 @@ def test_phone_detection(pipeline, test_texts):
     assert "555-123-4567" in phone_dets[0].text
 
 
+@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
 def test_ssn_detection(pipeline, test_texts):
     """Test SSN detection"""
     result = pipeline.detect(test_texts["ssn"])
@@ -74,6 +82,7 @@ def test_ssn_detection(pipeline, test_texts):
     assert "123-45-6789" in ssn_dets[0].text
 
 
+@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
 def test_person_name_detection(pipeline, test_texts):
     """Test person name detection with AI"""
     result = pipeline.detect(test_texts["person"])
@@ -85,6 +94,7 @@ def test_person_name_detection(pipeline, test_texts):
     assert "John" in detected_text or "Smith" in detected_text
 
 
+@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
 def test_location_detection(pipeline, test_texts):
     """Test location detection (AI feature)"""
     result = pipeline.detect(test_texts["location"])
@@ -95,6 +105,7 @@ def test_location_detection(pipeline, test_texts):
     assert "New York" in detected_text or "York" in detected_text
 
 
+@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
 def test_organization_detection(pipeline, test_texts):
     """Test organization detection (AI feature)"""
     result = pipeline.detect(test_texts["org"])
@@ -105,6 +116,7 @@ def test_organization_detection(pipeline, test_texts):
     assert "Microsoft" in detected_text
 
 
+@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
 def test_secret_detection(pipeline, test_texts):
     """Test API key/secret detection"""
     result = pipeline.detect(test_texts["secret"])
@@ -114,6 +126,7 @@ def test_secret_detection(pipeline, test_texts):
     assert "sk-" in secret_dets[0].text
 
 
+@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
 def test_harmful_content_detection(pipeline, test_texts):
     """Test harmful content detection"""
     result = pipeline.detect(test_texts["harmful"])
@@ -123,6 +136,7 @@ def test_harmful_content_detection(pipeline, test_texts):
     assert len(result.harmful_scores) > 0
 
 
+@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
 def test_credit_card_detection(pipeline, test_texts):
     """Test credit card detection"""
     result = pipeline.detect(test_texts["credit_card"])
@@ -132,6 +146,7 @@ def test_credit_card_detection(pipeline, test_texts):
 
 
 # ==================== Redaction Tests ====================
+@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
 def test_token_redaction(pipeline, test_texts):
     """Test TOKEN redaction strategy"""
     result = pipeline.detect(
@@ -143,6 +158,7 @@ def test_token_redaction(pipeline, test_texts):
     assert "john.smith@example.com" not in result.redacted_text
 
 
+@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
 def test_mask_all_redaction(pipeline, test_texts):
     """Test MASK_ALL redaction strategy"""
     result = pipeline.detect(
@@ -154,6 +170,7 @@ def test_mask_all_redaction(pipeline, test_texts):
     assert "555-123-4567" not in result.redacted_text
 
 
+@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
 def test_mask_last4_redaction(pipeline, test_texts):
     """Test MASK_LAST4 redaction strategy"""
     result = pipeline.detect(
@@ -164,6 +181,7 @@ def test_mask_last4_redaction(pipeline, test_texts):
     assert "4567" in result.redacted_text or "67" in result.redacted_text
 
 
+@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
 def test_hash_redaction(pipeline, test_texts):
     """Test HASH redaction strategy"""
     result = pipeline.detect(
@@ -176,6 +194,7 @@ def test_hash_redaction(pipeline, test_texts):
 
 
 # ==================== Mixed Content Tests ====================
+@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
 def test_mixed_content_detection(pipeline, test_texts):
     """Test detection of multiple types in one text"""
     result = pipeline.detect(test_texts["mixed"])
@@ -188,6 +207,7 @@ def test_mixed_content_detection(pipeline, test_texts):
     assert len(result.detections) >= 3
 
 
+@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
 def test_multiple_same_type(pipeline):
     """Test detecting multiple instances of same type"""
     text = "Email john@example.com or jane@example.com"
@@ -198,6 +218,7 @@ def test_multiple_same_type(pipeline):
 
 
 # ==================== Confidence Score Tests ====================
+@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
 def test_confidence_scores(pipeline, test_texts):
     """Test that detections include confidence scores"""
     result = pipeline.detect(test_texts["email"])
@@ -207,6 +228,7 @@ def test_confidence_scores(pipeline, test_texts):
         assert 0.0 <= detection.confidence <= 1.0
 
 
+@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
 def test_high_confidence_filtering(pipeline, test_texts):
     """Test filtering by confidence threshold"""
     result = pipeline.detect(test_texts["mixed"])
@@ -216,11 +238,9 @@ def test_high_confidence_filtering(pipeline, test_texts):
 
 
 # ==================== Configuration Tests ====================
+@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
 def test_custom_config():
     """Test custom pipeline configuration"""
-    if not AI_DETECTION_AVAILABLE:
-        pytest.skip("AI detection not available")
-    
     config = PipelineConfig(
         pii_threshold=0.8,
         harmful_threshold_per_label=0.6,
@@ -233,6 +253,7 @@ def test_custom_config():
     assert pipeline.config.harmful_threshold_per_label == 0.6
 
 
+@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
 def test_selective_detection(pipeline, test_texts):
     """Test enabling/disabling detection types"""
     result = pipeline.detect(
@@ -250,7 +271,8 @@ def test_selective_detection(pipeline, test_texts):
 # ==================== Legacy API Tests ====================
 def test_legacy_detect_pii(test_texts):
     """Test backward compatible detect_pii function"""
-    results = detect_pii(test_texts["email"])
+    # This should work with or without AI
+    results = detect_pii(test_texts["email"], use_ai=False)
     
     assert isinstance(results, dict)
     assert "EMAIL" in results
@@ -268,7 +290,8 @@ def test_legacy_detect_secrets(test_texts):
 
 def test_detect_all_threats_function(test_texts):
     """Test convenience function detect_all_threats"""
-    result = detect_all_threats(test_texts["mixed"])
+    # This should work with or without AI (falls back to regex)
+    result = detect_all_threats(test_texts["mixed"], use_ai=False)
     
     assert "original" in result
     assert "redacted" in result
@@ -278,6 +301,7 @@ def test_detect_all_threats_function(test_texts):
 
 
 # ==================== Edge Cases ====================
+@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
 def test_empty_text(pipeline):
     """Test with empty text"""
     result = pipeline.detect("")
@@ -286,12 +310,14 @@ def test_empty_text(pipeline):
     assert result.redacted_text == ""
 
 
+@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
 def test_no_sensitive_content(pipeline):
     """Test with text containing no sensitive data"""
     result = pipeline.detect("Hello world! How are you today?")
     assert result.harmful is False
 
 
+@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
 def test_unicode_content(pipeline):
     """Test with unicode characters"""
     text = "Contact José at josé@example.com"
@@ -302,6 +328,7 @@ def test_unicode_content(pipeline):
 
 
 # ==================== Performance Tests ====================
+@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
 def test_pipeline_reuse(pipeline, test_texts):
     """Test that pipeline can be reused efficiently"""
     for _ in range(5):
@@ -309,6 +336,7 @@ def test_pipeline_reuse(pipeline, test_texts):
         assert len(result.detections) > 0
 
 
+@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
 def test_batch_consistency(pipeline, test_texts):
     """Test that same input gives consistent results"""
     results = []
@@ -322,6 +350,7 @@ def test_batch_consistency(pipeline, test_texts):
 
 
 # ==================== Integration Tests ====================
+@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
 def test_result_to_dict(pipeline, test_texts):
     """Test conversion of result to dictionary"""
     result = pipeline.detect(test_texts["mixed"])
@@ -334,6 +363,7 @@ def test_result_to_dict(pipeline, test_texts):
     assert isinstance(result_dict["detections"], dict)
 
 
+@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
 def test_detection_to_dict(pipeline, test_texts):
     """Test detection to_dict method"""
     result = pipeline.detect(test_texts["email"])
@@ -353,6 +383,7 @@ def test_use_ai_flag():
     """Test use_ai flag for backward compatibility"""
     text = "Email: john@example.com"
     
+    # When AI not available, both should use regex
     result_ai = detect_pii(text, use_ai=True)
     result_regex = detect_pii(text, use_ai=False)
     

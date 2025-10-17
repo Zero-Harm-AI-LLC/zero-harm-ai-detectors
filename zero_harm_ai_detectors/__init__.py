@@ -34,8 +34,18 @@ except ImportError as e:
     print(f"Warning: AI detection not available: {e}")
     print("Install transformers and torch: pip install transformers torch")
     AI_DETECTION_AVAILABLE = False
+    
+    # Create dummy classes for when AI isn't available
     ZeroHarmPipeline = None
     PipelineConfig = None
+    RedactionStrategy = None
+    DetectionType = None
+    Detection = None
+    PipelineResult = None
+    AIPIIDetector = None
+    HarmfulContentDetector = None
+    detect_all = None
+    get_pipeline = None
 
 
 # ==================== LEGACY REGEX-BASED DETECTORS ====================
@@ -62,6 +72,15 @@ from .harmful_detectors import (
     HarmfulTextDetector as HarmfulTextDetectorLegacy,
     DetectionConfig
 )
+
+# Export HarmfulTextDetector for backward compatibility
+HarmfulTextDetector = HarmfulTextDetectorLegacy
+
+# If AI not available, use legacy RedactionStrategy
+if not AI_DETECTION_AVAILABLE:
+    RedactionStrategy = RedactionStrategyLegacy
+    # Create a simple SecretsDetector reference
+    SecretsDetector = SecretsDetectorLegacy
 
 
 # ==================== SMART API WRAPPER ====================
@@ -208,11 +227,15 @@ def detect_all_threats(
         harmful_scores = {}
         
         if detect_harmful:
-            detector = HarmfulTextDetectorLegacy()
-            harm_result = detector.detect(text)
-            is_harmful = harm_result['harmful']
-            severity = harm_result['severity']
-            harmful_scores = harm_result['scores']
+            try:
+                detector = HarmfulTextDetectorLegacy()
+                harm_result = detector.detect(text)
+                is_harmful = harm_result['harmful']
+                severity = harm_result['severity']
+                harmful_scores = harm_result['scores']
+            except ImportError:
+                # If transformers not available, skip harmful detection
+                pass
         
         return {
             "original": text,
@@ -265,6 +288,7 @@ __all__ = [
     'MRNDetector',
     'PersonNameDetector',
     'AddressDetector',
+    'HarmfulTextDetector',  # Added for backward compatibility
     'HarmfulTextDetectorLegacy',
     'DetectionConfig',
     'default_detectors',
