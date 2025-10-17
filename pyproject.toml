@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0", "wheel", "setuptools-scm>=6.2"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "zero_harm_ai_detectors"  # Changed: removed hyphens
+name = "zero_harm_ai_detectors"
 dynamic = ["version"]
-description = "Privacy and harmful content detection library"
+description = "AI-powered privacy and harmful content detection library"
 authors = [
     {name = "Zero Harm AI LLC", email = "info@zeroharmai.com"}
 ]
@@ -13,7 +13,7 @@ readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.8"
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
@@ -21,12 +21,39 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Text Processing :: Linguistic",
 ]
+
 dependencies = [
-    "transformers>=4.20.0",
-    "torch>=1.12.0", 
     "regex>=2022.1.18",
     "numpy>=1.21.0",
+]
+
+[project.optional-dependencies]
+ai = [
+    "transformers>=4.30.0",
+    "torch>=2.0.0",
+    "sentencepiece>=0.1.99",
+    "protobuf>=3.20.0",
+]
+
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "black>=23.0.0",
+    "flake8>=6.0.0",
+]
+
+all = [
+    "transformers>=4.30.0",
+    "torch>=2.0.0",
+    "sentencepiece>=0.1.99",
+    "protobuf>=3.20.0",
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "black>=23.0.0",
+    "flake8>=6.0.0",
 ]
 
 [project.urls]
@@ -36,13 +63,18 @@ Issues = "https://github.com/Zero-Harm-AI-LLC/zero-harm-ai-detectors/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["zero_harm_ai_detectors*"]  # Changed: match new package name
+include = ["zero_harm_ai_detectors*"]
 
 [tool.setuptools_scm]
-write_to = "zero_harm_ai_detectors/_version.py"  # Changed: match new folder name
+write_to = "zero_harm_ai_detectors/_version.py"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+addopts = "-v --cov=zero_harm_ai_detectors --cov-report=term-missing"
+
+[tool.black]
+line-length = 100
+target-version = ["py38", "py39", "py310", "py311"]
