@@ -3,22 +3,23 @@ name: Publish to PyPI and Update Backend
 on:
   push:
     tags:
-      - 'v*'  # Triggered on version tags like v0.1.0, v1.2.3
+      - 'v*'
   workflow_dispatch:
 
 permissions:
-  contents: write  # Required for creating releases
+  contents: write
   actions: read
   checks: write
 
 jobs:
-  test:
+  test-basic:
     runs-on: ubuntu-latest
+    name: Basic Tests (Regex Only)
     
     steps:
     - uses: actions/checkout@v4
       with:
-        fetch-depth: 0  # Required for setuptools-scm to work
+        fetch-depth: 0
     
     - name: Set up Python 3.9
       uses: actions/setup-python@v4
@@ -30,27 +31,61 @@ jobs:
         python -m pip install --upgrade pip
         pip install pytest pytest-cov build twine setuptools-scm
     
-    - name: Install package
+    - name: Install package (base only)
       run: pip install -e .
     
-    - name: Run tests
+    - name: Run basic tests
       run: |
-        pytest tests/ --cov=detectors --cov-report=xml
+        # Only run tests that don't require AI
+        pytest tests/test_detectors.py tests/test_library.py --cov=zero_harm_ai_detectors --cov-report=xml
     
     - name: Lint with flake8
       run: |
         pip install flake8
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=88 --statistics
+
+  test-ai:
+    runs-on: ubuntu-latest
+    name: AI Tests (With Transformers)
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Cache models
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/huggingface
+        key: ${{ runner.os }}-transformers-${{ hashFiles('**/pyproject.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-transformers-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest pytest-cov
+    
+    - name: Install package with AI dependencies
+      run: pip install -e .[ai]
+    
+    - name: Run AI tests
+      run: |
+        pytest tests/test_ai_detectors.py -v
 
   publish:
-    needs: test
+    needs: [test-basic, test-ai]
     runs-on: ubuntu-latest
     
     steps:
     - uses: actions/checkout@v4
       with:
-        fetch-depth: 0  # Required for setuptools-scm
+        fetch-depth: 0
     
     - name: Set up Python 3.9
       uses: actions/setup-python@v4
@@ -78,6 +113,7 @@ jobs:
         TWINE_PASSWORD: ${{ secrets.TEST_PYPI_API_TOKEN }}
       run: |
         twine upload --repository testpypi dist/* --skip-existing || true
+      continue-on-error: true
     
     - name: Publish to PyPI
       env:
@@ -115,15 +151,6 @@ jobs:
       run: |
         VERSION=${GITHUB_REF#refs/tags/v}
         echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-        echo "Extracted version: $VERSION"
-    
-    - name: Debug Repository Dispatch
-      run: |
-        echo "Triggering repository dispatch for:"
-        echo "Repository: Zero-Harm-AI-LLC/zero-harm-ai-backend"
-        echo "Event Type: library-updated"
-        echo "Version: ${{ steps.version.outputs.VERSION }}"
-        echo "Library Name: zero_harm_ai_detectors"
     
     - name: Wait for PyPI propagation
       run: |
@@ -131,7 +158,6 @@ jobs:
         sleep 120
     
     - name: Trigger Backend Update
-      id: dispatch
       uses: peter-evans/repository-dispatch@v2
       with:
         token: ${{ secrets.BACKEND_REPO_TOKEN }}
@@ -142,9 +168,3 @@ jobs:
             "library_version": "${{ steps.version.outputs.VERSION }}",
             "library_name": "zero_harm_ai_detectors"
           }
-    
-    - name: Verify Dispatch Success
-      run: |
-        echo "✅ Repository dispatch sent successfully"
-        echo "Check the backend repository Actions tab for the triggered workflow"
-        echo "Backend repo: https://github.com/Zero-Harm-AI-LLC/zero-harm-ai-backend/actions"
