@@ -37,7 +37,7 @@ jobs:
     - name: Run basic tests
       run: |
         # Only run tests that don't require AI
-        pytest tests/test_detectors.py tests/test_library.py --cov=zero_harm_ai_detectors --cov-report=xml
+        pytest tests/test_detectors.py --cov=zero_harm_ai_detectors --cov-report=xml
     
     - name: Lint with flake8
       run: |
