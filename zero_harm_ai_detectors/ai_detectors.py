@@ -151,7 +151,7 @@ class AIPIIDetector:
         )
         
         # Additional regex patterns for structured PII (emails, phones, etc.)
-        self.email_pattern = re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b')
+        self.email_pattern = re.compile(r'\b[\w._%+-]+@[\w.-]+\.[A-Za-z]{2,}\b', re.UNICODE)
         self.phone_pattern = re.compile(r'(?:(?:\+1[-.\s]?)?\(?(?:\d{3})\)?[-.\s]?\d{3}[-.\s]?\d{4})\b')
         self.ssn_pattern = re.compile(r'\b(?!000|666|9\d{2})\d{3}[- ]?(?!00)\d{2}[- ]?(?!0000)\d{4}\b')
         self.credit_card_pattern = re.compile(r'\b(?:\d[ -]?){13,19}\b')

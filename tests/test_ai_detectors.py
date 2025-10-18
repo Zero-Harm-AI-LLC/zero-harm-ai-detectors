@@ -46,7 +46,7 @@ def test_texts():
         "secret": "API key: sk-1234567890abcdef1234567890abcdef",
         "harmful": "I hate you and want to hurt you",
         "credit_card": "Card number: 4532-0151-1283-0366",
-        "mixed": "Email John Smith at john@example.com or call 555-123-4567. API key: sk-abc123."
+        "mixed": "Email John Smith at john@example.com or call 555-123-4567. API key: sk-1234567890abcdef1234567890abcdef."
     }
 
 
