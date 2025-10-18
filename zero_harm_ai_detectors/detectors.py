@@ -75,7 +75,11 @@ class EmailDetector(RegexDetector):
 class PhoneDetector(RegexDetector):
     type = "PHONE"
     def __init__(self):
-        super().__init__(r"(?:(?:\+1[-.\s]?)?\(?(?:\d{3})\)?[-.\s]?\d{3}[-.\s]?\d{4})\b")
+        # Require at least one separator (dash, dot, or space) between digit groups
+        # This prevents false positives on continuous digit strings like credit cards
+        super().__init__(
+            r"(?:(?:\+1[-.\s]?)?\(?(?:\d{3})\)?[-.\s]\d{3}[-.\s]\d{4})\b"
+        )
 
 class SSNDetector(RegexDetector):
     type = "SSN"

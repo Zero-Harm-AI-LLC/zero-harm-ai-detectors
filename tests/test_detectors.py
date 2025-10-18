@@ -34,7 +34,7 @@ def test_phone_detection():
 
 def test_credit_card_detection():
     """Test credit card detection with valid Luhn checksum"""
-    text = "My card is 4532015112830366"  # Valid test card number
+    text = "My card is 4532-0151-1283-0366"  # Valid test card number
     pii = detect_pii(text)
     assert "CREDIT_CARD" in pii
 
