@@ -1,12 +1,12 @@
 # Migration Guide: Upgrading to AI-Based Detection
 
-Complete guide for migrating from regex-based v0.1.x to AI-powered v0.2.0.
+Complete guide for migrating from regex-based v0.1.x to AI-powered v0.2.x.
 
 ## Overview
 
 ### What's Changing
 
-| Aspect | v0.1.x (Regex) | v0.2.0 (AI) |
+| Aspect | v0.1.x (Regex) | v0.2.x (AI) |
 |--------|----------------|-------------|
 | Person names | 30-40% accuracy | 85-95% accuracy |
 | Speed | 1-5ms | 50-200ms |
@@ -398,7 +398,7 @@ pii = detect_pii("Contact John Smith")
 # Detections: {} (missed!)
 ```
 
-### After (v0.2.0)
+### After (v0.2.x)
 
 ```python
 # Average: 150ms per detection

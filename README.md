@@ -4,7 +4,7 @@
 
 Now with **transformer-based models** for 85-95% accuracy in person name detection!
 
-## 🚀 What's New in v0.2.0
+## 🚀 What's New in v0.2.x
 
 - **🤖 AI-Powered Detection**: Uses BERT/RoBERTa for accurate PII detection
 - **🎯 Unified Pipeline**: Single `ZeroHarmPipeline` class for everything

@@ -140,21 +140,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Version Comparison
 
-| Feature | v0.1.0 | v0.1.2 | v0.2.0 |
-|---------|--------|--------|--------|
-| Person Name Detection | 30-40% | 30-40% | 85-95% ⭐ |
-| Location Detection | ❌ | ❌ | ✅ ⭐ |
-| Organization Detection | ❌ | ❌ | ✅ ⭐ |
-| Confidence Scores | ❌ | ❌ | ✅ ⭐ |
-| Unified Pipeline | ❌ | ❌ | ✅ ⭐ |
-| Detection Speed | 1-5ms | 1-5ms | 50-200ms |
-| Backward Compatible | N/A | ✅ | ✅ |
+| Feature | v0.1.0 | v0.2.x |
+|---------|--------|--------|
+| Person Name Detection | 30-40% | 85-95% ⭐ |
+| Location Detection | ❌ | ✅ ⭐ |
+| Organization Detection | ❌ | ✅ ⭐ |
+| Confidence Scores | ❌ | ✅ ⭐ |
+| Unified Pipeline | ❌ | ✅ ⭐ |
+| Detection Speed | 1-5ms | 50-200ms |
+| Backward Compatible | N/A | ✅ |
 
 ---
 
 ## Upgrade Guide
 
-### From v0.1.x to v0.2.0
+### From v0.1.x to v0.2.x
 
 **No code changes required!** Your existing code works automatically:
 
@@ -194,11 +194,10 @@ See [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md) for detailed instructions.
 ## Notes
 
 ### Breaking Changes
-- **v0.1.2**: Package name changed from hyphenated to underscored (import path changed)
-- **v0.2.0**: No breaking changes (100% backward compatible)
+- **v0.2.x**: No breaking changes (100% backward compatible)
 
 ### Deprecation Warnings
-- **v0.2.0**: Legacy `HarmfulTextDetector` class is deprecated in favor of `ZeroHarmPipeline`
+- **v0.2.x**: Legacy `HarmfulTextDetector` class is deprecated in favor of `ZeroHarmPipeline`
   - Will be removed in v1.0.0
   - Update your code to use `ZeroHarmPipeline` for future compatibility
 

@@ -1,4 +1,4 @@
-# Deployment Guide: Zero Harm AI v0.2.0
+# Deployment Guide: Zero Harm AI v0.2.x
 
 Complete step-by-step guide for deploying the AI-powered detection system.
 
@@ -83,7 +83,7 @@ pytest tests/test_ai_detectors.py -v
 ```bash
 # Commit all changes
 git add .
-git commit -m "Add AI-powered detection pipeline v0.2.0
+git commit -m "Add AI-powered detection pipeline v0.2.x
 
 - AI-based PII detection with 90% accuracy for person names
 - New unified ZeroHarmPipeline class
@@ -92,7 +92,7 @@ git commit -m "Add AI-powered detection pipeline v0.2.0
 - Comprehensive documentation and tests"
 
 # Create and push tag
-git tag v0.2.0
+git tag v0.2.x
 git push origin main --tags
 ```
 
@@ -124,7 +124,7 @@ Expected workflow:
 
 ### What Happens Automatically
 
-When library v0.2.0 is published:
+When library v0.2.x is published:
 
 1. **PyPI Publication** (~2 minutes)
    - Package available on PyPI
@@ -178,7 +178,7 @@ pytest tests/
 
 # Commit and push
 git add proxy.py requirements.txt
-git commit -m "Update to Zero Harm AI Detectors v0.2.0"
+git commit -m "Update to Zero Harm AI Detectors v0.2.x"
 git push origin main
 ```
 
@@ -491,7 +491,7 @@ Send update notification about improved accuracy and new features.
 - [ ] Updated pyproject.toml
 - [ ] Added tests
 - [ ] Updated docs
-- [ ] Created v0.2.0 tag
+- [ ] Created v0.2.x tag
 - [ ] Pushed to GitHub
 
 ### Backend
