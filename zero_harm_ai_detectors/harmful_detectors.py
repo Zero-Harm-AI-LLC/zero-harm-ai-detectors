@@ -37,10 +37,11 @@ class DetectionConfig:
 class HarmfulPatterns:
     """Regex patterns for detecting harmful content"""
     
-    # Toxic/Offensive Language
+    # Toxic/Offensive Language - ADDED hate, despise, loathe
     TOXIC = re.compile(
         r'\b(fuck|shit|damn|hell|ass|bitch|bastard|crap|piss|whore|slut|'
-        r'dickhead|asshole|dumbass|jackass|moron|idiot|stupid)\b',
+        r'dickhead|asshole|dumbass|jackass|moron|idiot|stupid|'
+        r'hate|hated|hates|hating|despise|despises|loathe|loathes)\b',
         re.IGNORECASE
     )
     
