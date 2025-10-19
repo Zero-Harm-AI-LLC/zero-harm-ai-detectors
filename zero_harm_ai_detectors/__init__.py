@@ -230,11 +230,21 @@ def detect_all_threats(
             try:
                 detector = HarmfulTextDetectorLegacy()
                 harm_result = detector.detect(text)
-                is_harmful = harm_result['harmful']
-                severity = harm_result['severity']
-                harmful_scores = harm_result['scores']
-            except ImportError:
-                # If transformers not available, skip harmful detection
+                
+                # Handle new format: {'HARMFUL_CONTENT': [{...}]}
+                if harm_result and "HARMFUL_CONTENT" in harm_result:
+                    harm_data = harm_result["HARMFUL_CONTENT"][0]
+                    is_harmful = harm_data.get("harmful", True)
+                    severity = harm_data.get("severity", "low")
+                    harmful_scores = harm_data.get("scores", {})
+                    detections.update(harm_result)  # Add harmful content to detections
+                else:
+                    # No harmful content found (empty dict)
+                    is_harmful = False
+                    severity = "low"
+                    harmful_scores = {}
+            except (ImportError, Exception) as e:
+                # If detection fails, skip harmful detection
                 pass
         
         return {

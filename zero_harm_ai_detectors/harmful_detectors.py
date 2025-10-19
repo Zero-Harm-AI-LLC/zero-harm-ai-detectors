@@ -1,23 +1,6 @@
 from __future__ import annotations
 
 """
-Legacy harmful content detector (v0.1.x)
-
-⚠️  DEPRECATED: This detector is kept for backward compatibility only.
-
-For new code, use the AI-powered unified pipeline:
-    from zero_harm_ai_detectors import ZeroHarmPipeline
-    pipeline = ZeroHarmPipeline()
-    result = pipeline.detect(text)
-
-This legacy detector will be maintained but not enhanced. It provides:
-1. Backward compatibility with v0.1.x code
-2. Fallback when transformers is not installed
-3. Standalone harmful content detection
-
-File: zero_harm_ai_detectors/harmful_detectors.py
-"""
-"""
 Lightweight harmful content detector using regex patterns (v0.1.x compatible)
 
 This detector provides fast, regex-based harmful content detection without
@@ -234,7 +217,8 @@ class HarmfulTextDetector:
                     "end": length,
                     "severity": "low|medium|high",
                     "labels": ["toxic", "threat", ...],
-                    "scores": {"toxic": 0.5, "threat": 0.7, ...}
+                    "scores": {"toxic": 0.5, "threat": 0.7, ...},
+                    "harmful": True  # Added for backward compatibility
                 }
             ]
         }
@@ -286,6 +270,7 @@ class HarmfulTextDetector:
                     "severity": severity,
                     "labels": active_labels,
                     "scores": scores,
+                    "harmful": True,  # For backward compatibility
                     "match_counts": {
                         "toxic": toxic_count,
                         "threat": threat_count,
