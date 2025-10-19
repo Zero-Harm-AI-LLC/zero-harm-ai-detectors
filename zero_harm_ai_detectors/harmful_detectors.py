@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Legacy harmful content detector (v0.1.x)
 
@@ -31,7 +33,6 @@ For more accurate AI-based detection, use ZeroHarmPipeline:
 
 File: zero_harm_ai_detectors/harmful_detectors.py
 """
-from __future__ import annotations
 import re
 from dataclasses import dataclass
 from typing import Dict, List, Any
