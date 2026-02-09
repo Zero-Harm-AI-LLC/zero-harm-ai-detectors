@@ -1,59 +1,31 @@
 """
-Zero Harm AI Detectors - AI-powered PII and harmful content detection
+Zero Harm AI Detectors - Freemium Detection Library
 
-File: zero_harm_ai_detectors/__init__.py
+Two detection modes:
+- REGEX MODE: Fast pattern-based detection (free tier)
+- AI MODE: Transformer-based detection (paid tier)
 
 Usage:
-    # NEW API (Recommended)
-    from zero_harm_ai_detectors import ZeroHarmPipeline
-    pipeline = ZeroHarmPipeline()
-    result = pipeline.detect("Contact john@example.com")
+    from zero_harm_ai_detectors import ZeroHarmDetector
     
-    # OLD API (Still works!)
-    from zero_harm_ai_detectors import detect_pii, detect_secrets
-    pii = detect_pii("Contact john@example.com")
+    # Regex mode (free)
+    detector = ZeroHarmDetector(mode='regex')
+    result = detector.detect(text)
+    
+    # AI mode (paid)
+    detector = ZeroHarmDetector(mode='ai')
+    result = detector.detect(text)
+
+File: zero_harm_ai_detectors/__init__.py
 """
 
-# ==================== NEW AI-BASED PIPELINE ====================
-try:
-    from .ai_detectors import (
-        ZeroHarmPipeline,
-        PipelineConfig,
-        RedactionStrategy,
-        DetectionType,
-        Detection,
-        PipelineResult,
-        AIPIIDetector,
-        SecretsDetector,
-        HarmfulContentDetector,
-        detect_all,
-        get_pipeline
-    )
-    AI_DETECTION_AVAILABLE = True
-except ImportError as e:
-    print(f"Warning: AI detection not available: {e}")
-    print("Install transformers and torch: pip install transformers torch")
-    AI_DETECTION_AVAILABLE = False
-    
-    # Create dummy classes for when AI isn't available
-    ZeroHarmPipeline = None
-    PipelineConfig = None
-    RedactionStrategy = None
-    DetectionType = None
-    Detection = None
-    PipelineResult = None
-    AIPIIDetector = None
-    HarmfulContentDetector = None
-    detect_all = None
-    get_pipeline = None
-
-
-# ==================== LEGACY REGEX-BASED DETECTORS ====================
-from .detectors import (
-    detect_pii as detect_pii_legacy,
-    detect_secrets as detect_secrets_legacy,
-    redact_text as redact_text_legacy,
-    default_detectors,
+# ==================== REGEX MODE (FREE TIER) ====================
+from .regex_detectors import (
+    detect_pii as detect_pii_regex,
+    detect_secrets as detect_secrets_regex,
+    redact_text,
+    RedactionStrategy as RegexRedactionStrategy,
+    # Individual detectors
     EmailDetector,
     PhoneDetector,
     SSNDetector,
@@ -64,197 +36,326 @@ from .detectors import (
     MRNDetector,
     PersonNameDetector,
     AddressDetector,
-    SecretsDetector as SecretsDetectorLegacy,
-    RedactionStrategy as RedactionStrategyLegacy
+    SecretsDetector,
 )
 
-from .harmful_detectors import (
-    HarmfulTextDetector as HarmfulTextDetectorLegacy,
-    DetectionConfig
+from .regex_harmful_detectors import (
+    detect_harmful as detect_harmful_regex,
+    HarmfulTextDetector as RegexHarmfulDetector,
+    DetectionConfig,
 )
 
-# Export HarmfulTextDetector for backward compatibility
-HarmfulTextDetector = HarmfulTextDetectorLegacy
 
-# If AI not available, use legacy RedactionStrategy
-if not AI_DETECTION_AVAILABLE:
-    RedactionStrategy = RedactionStrategyLegacy
-    # Create a simple SecretsDetector reference
-    SecretsDetector = SecretsDetectorLegacy
+# ==================== AI MODE (PAID TIER) ====================
+try:
+    from .ai_detectors import (
+        ZeroHarmPipeline as AIPipeline,
+        PipelineConfig,
+        RedactionStrategy as AIRedactionStrategy,
+        DetectionType,
+        Detection,
+        PipelineResult,
+        AIPIIDetector,
+        HarmfulContentDetector as AIHarmfulDetector,
+        detect_all as detect_all_ai,
+        get_pipeline,
+    )
+    AI_MODE_AVAILABLE = True
+except ImportError:
+    # AI mode not available - only regex mode
+    AI_MODE_AVAILABLE = False
+    AIPipeline = None
+    PipelineConfig = None
+    AIRedactionStrategy = None
+    DetectionType = None
+    Detection = None
+    PipelineResult = None
+    AIPIIDetector = None
+    AIHarmfulDetector = None
+    detect_all_ai = None
+    get_pipeline = None
 
 
-# ==================== SMART API WRAPPER ====================
-def detect_pii(text: str, use_ai: bool = True, **kwargs):
+# ==================== UNIFIED DETECTOR ====================
+class ZeroHarmDetector:
     """
-    Detect PII in text
+    Unified detector supporting both regex and AI modes
     
-    Args:
-        text: Input text
-        use_ai: If True, use AI-based detection (more accurate).
-                If False, use legacy regex detection (faster).
-        **kwargs: Additional arguments
-        
-    Returns:
-        Dictionary of detected PII grouped by type
-    """
-    if use_ai and AI_DETECTION_AVAILABLE:
-        pipeline = get_pipeline()
-        return pipeline.detect_pii_legacy(text)
-    else:
-        return detect_pii_legacy(text, **kwargs)
-
-
-def detect_secrets(text: str, use_ai: bool = False, **kwargs):
-    """
-    Detect secrets and API keys in text
+    REGEX MODE (Free Tier):
+    - Fast: 1-5ms per text
+    - Accuracy: 95%+ for emails/phones/SSN, 30-40% for names
+    - Cost: $0.01/scan
+    - Use: High-volume, cost-sensitive scanning
     
-    Args:
-        text: Input text
-        use_ai: If True, use AI pipeline. If False, use regex (recommended for secrets).
-        **kwargs: Additional arguments
-        
-    Returns:
-        Dictionary of detected secrets
-    """
-    if use_ai and AI_DETECTION_AVAILABLE:
-        pipeline = get_pipeline()
-        return pipeline.detect_secrets_legacy(text)
-    else:
-        return detect_secrets_legacy(text, **kwargs)
-
-
-def redact_text(text: str, findings: dict, strategy: str = "mask_all", **kwargs):
-    """
-    Redact sensitive information from text
+    AI MODE (Paid Tier):
+    - Slower: 50-200ms per text
+    - Accuracy: 99%+ for structured data, 85-95% for names
+    - Cost: $0.11/scan
+    - Use: Production-grade, accuracy-critical scanning
     
-    Args:
-        text: Original text
-        findings: Dictionary of detections from detect_pii or detect_secrets
-        strategy: Redaction strategy ("mask_all", "mask_last4", "hash", "token")
+    Example:
+        # Regex mode
+        detector = ZeroHarmDetector(mode='regex')
+        result = detector.detect("Contact john@example.com")
         
-    Returns:
-        Redacted text
+        # AI mode
+        detector = ZeroHarmDetector(mode='ai')
+        result = detector.detect("Contact John Smith at Microsoft")
     """
-    return redact_text_legacy(text, findings, strategy, **kwargs)
-
-
-def detect_harmful(text: str, use_ai: bool = True, **kwargs):
-    """
-    Detect harmful content in text
     
-    Args:
-        text: Input text
-        use_ai: If True, use AI pipeline (recommended)
-        **kwargs: Additional arguments
+    VALID_MODES = ['regex', 'ai']
+    
+    def __init__(self, mode: str = 'regex', config: PipelineConfig = None):
+        """
+        Initialize detector
         
-    Returns:
-        Dictionary with harmful content analysis
-    """
-    if use_ai and AI_DETECTION_AVAILABLE:
-        pipeline = get_pipeline()
-        _, scores, severity, active_labels = pipeline.harmful_detector.detect(text)
-        is_harmful = severity in ["medium", "high"]
-        return {
-            "text": text,
-            "harmful": is_harmful,
-            "severity": severity,
-            "active_labels": active_labels,
-            "scores": scores
+        Args:
+            mode: 'regex' for pattern-based (free) or 'ai' for transformer-based (paid)
+            config: Optional PipelineConfig for AI mode
+        
+        Raises:
+            ValueError: If mode is not 'regex' or 'ai'
+            ImportError: If mode='ai' but transformers/torch not installed
+        """
+        if mode not in self.VALID_MODES:
+            raise ValueError(
+                f"Invalid mode: {mode}. Must be 'regex' or 'ai'."
+            )
+        
+        self.mode = mode
+        self.tier = 'paid' if mode == 'ai' else 'free'
+        
+        if mode == 'ai':
+            if not AI_MODE_AVAILABLE:
+                raise ImportError(
+                    "AI mode requires additional packages.\n"
+                    "Install with: pip install 'zero_harm_ai_detectors[ai]'\n"
+                    "Or use regex mode: ZeroHarmDetector(mode='regex')"
+                )
+            self._pipeline = AIPipeline(config)
+        else:
+            # Regex mode - no initialization needed
+            self._pipeline = None
+    
+    def detect(
+        self,
+        text: str,
+        redaction_strategy: str = None,
+        detect_pii: bool = True,
+        detect_secrets: bool = True,
+        detect_harmful: bool = True
+    ):
+        """
+        Detect sensitive content in text
+        
+        Args:
+            text: Input text to analyze
+            redaction_strategy: How to redact ('token', 'mask_all', 'mask_last4', 'hash')
+            detect_pii: Whether to detect PII
+            detect_secrets: Whether to detect secrets/API keys
+            detect_harmful: Whether to detect harmful content
+        
+        Returns:
+            AI mode: PipelineResult object
+            Regex mode: Dictionary with detection results
+        """
+        if self.mode == 'ai':
+            return self._detect_ai(
+                text, redaction_strategy, 
+                detect_pii, detect_secrets, detect_harmful
+            )
+        else:
+            return self._detect_regex(
+                text, redaction_strategy,
+                detect_pii, detect_secrets, detect_harmful
+            )
+    
+    def _detect_ai(self, text, redaction_strategy, detect_pii, detect_secrets, detect_harmful):
+        """AI mode detection"""
+        strategy = redaction_strategy or 'token'
+        
+        # Convert string to enum
+        from .ai_detectors import RedactionStrategy as RS
+        strategy_map = {
+            'token': RS.TOKEN,
+            'mask_all': RS.MASK_ALL,
+            'mask_last4': RS.MASK_LAST4,
+            'hash': RS.HASH
         }
-    else:
-        detector = HarmfulTextDetectorLegacy(**kwargs)
-        return detector.detect(text)
-
-
-# ==================== UNIFIED DETECTION FUNCTION ====================
-def detect_all_threats(
-    text: str,
-    detect_pii: bool = True,
-    detect_secrets: bool = True,
-    detect_harmful: bool = True,
-    redaction_strategy: str = "token",
-    use_ai: bool = True
-):
-    """
-    One-stop function to detect all threats in text
-    
-    Args:
-        text: Input text to analyze
-        detect_pii: Check for PII
-        detect_secrets: Check for secrets/API keys
-        detect_harmful: Check for harmful content
-        redaction_strategy: How to redact ("token", "mask_all", "mask_last4", "hash")
-        use_ai: Use AI models (more accurate) or regex (faster)
+        rs = strategy_map.get(strategy, RS.TOKEN)
         
-    Returns:
-        Dictionary with all results
-    """
-    if use_ai and AI_DETECTION_AVAILABLE:
-        pipeline = get_pipeline()
-        
-        try:
-            from .ai_detectors import RedactionStrategy
-            strategy = RedactionStrategy(redaction_strategy)
-        except (ValueError, ImportError):
-            strategy = RedactionStrategy.TOKEN
-        
-        result = pipeline.detect(
+        return self._pipeline.detect(
             text,
-            redaction_strategy=strategy,
+            redaction_strategy=rs,
             detect_pii=detect_pii,
             detect_secrets=detect_secrets,
             detect_harmful=detect_harmful
         )
-        return result.to_dict()
-    else:
+    
+    def _detect_regex(self, text, redaction_strategy, detect_pii, detect_secrets, detect_harmful):
+        """Regex mode detection"""
         detections = {}
         
+        # PII detection
         if detect_pii:
-            pii = detect_pii_legacy(text)
+            pii = detect_pii_regex(text)
             detections.update(pii)
         
+        # Secrets detection
         if detect_secrets:
-            secrets = detect_secrets_legacy(text)
+            secrets = detect_secrets_regex(text)
             detections.update(secrets)
         
-        if detections:
-            redacted = redact_text_legacy(text, detections, redaction_strategy)
-        else:
-            redacted = text
-        
+        # Harmful content detection
         is_harmful = False
-        severity = "low"
+        severity = 'low'
         harmful_scores = {}
         
         if detect_harmful:
-            try:
-                detector = HarmfulTextDetectorLegacy()
-                harm_result = detector.detect(text)
-                
-                # Handle new format: {'HARMFUL_CONTENT': [{...}]}
-                if harm_result and "HARMFUL_CONTENT" in harm_result:
-                    harm_data = harm_result["HARMFUL_CONTENT"][0]
-                    is_harmful = harm_data.get("harmful", True)
-                    severity = harm_data.get("severity", "low")
-                    harmful_scores = harm_data.get("scores", {})
-                    detections.update(harm_result)  # Add harmful content to detections
-                else:
-                    # No harmful content found (empty dict)
-                    is_harmful = False
-                    severity = "low"
-                    harmful_scores = {}
-            except (ImportError, Exception) as e:
-                # If detection fails, skip harmful detection
-                pass
+            harmful = detect_harmful_regex(text)
+            if harmful:
+                is_harmful = True
+                # Extract severity and scores from harmful result
+                if isinstance(harmful, dict) and 'HARMFUL_CONTENT' in harmful:
+                    harm_data = harmful['HARMFUL_CONTENT'][0]
+                    severity = harm_data.get('severity', 'low')
+                    harmful_scores = harm_data.get('scores', {})
+                    detections.update(harmful)
+        
+        # Redaction
+        strategy = redaction_strategy or 'mask_all'
+        if detections:
+            redacted = redact_text(text, detections, strategy)
+        else:
+            redacted = text
         
         return {
-            "original": text,
-            "redacted": redacted,
-            "detections": detections,
-            "harmful": is_harmful,
-            "severity": severity,
-            "harmful_scores": harmful_scores
+            'original': text,
+            'redacted': redacted,
+            'detections': detections,
+            'harmful': is_harmful,
+            'severity': severity,
+            'harmful_scores': harmful_scores,
+            'mode': 'regex',
+            'tier': 'free',
+            'upgrade_available': self._should_show_upgrade(detections)
         }
+    
+    def _should_show_upgrade(self, detections):
+        """Check if upgrade prompt should be shown"""
+        # Show upgrade if person names detected (low accuracy in regex mode)
+        has_person_names = 'PERSON_NAME' in detections
+        return has_person_names or len(detections) > 5
+
+
+# ==================== CONVENIENCE FUNCTIONS ====================
+def detect(text: str, mode: str = 'regex', **kwargs):
+    """
+    Quick detection with specified mode
+    
+    Args:
+        text: Input text
+        mode: 'regex' (free, fast) or 'ai' (paid, accurate)
+        **kwargs: Additional arguments for detect()
+    
+    Returns:
+        Detection results
+    
+    Example:
+        # Regex mode
+        result = detect("john@example.com", mode='regex')
+        
+        # AI mode
+        result = detect("John Smith", mode='ai')
+    """
+    detector = ZeroHarmDetector(mode=mode)
+    return detector.detect(text, **kwargs)
+
+
+def detect_pii(text: str, mode: str = 'regex'):
+    """
+    Detect PII with specified mode
+    
+    Args:
+        text: Input text
+        mode: 'regex' or 'ai'
+    
+    Returns:
+        Dictionary of detected PII by type
+    """
+    if mode == 'ai' and AI_MODE_AVAILABLE:
+        pipeline = get_pipeline()
+        result = pipeline.detect(text, detect_secrets=False, detect_harmful=False)
+        
+        # Convert to common format
+        grouped = {}
+        for det in result.detections:
+            if det.type not in grouped:
+                grouped[det.type] = []
+            grouped[det.type].append({
+                'span': det.text,
+                'start': det.start,
+                'end': det.end,
+                'confidence': det.confidence
+            })
+        return grouped
+    else:
+        return detect_pii_regex(text)
+
+
+def detect_secrets(text: str, mode: str = 'regex'):
+    """
+    Detect secrets with specified mode
+    
+    Args:
+        text: Input text
+        mode: 'regex' or 'ai'
+    
+    Returns:
+        Dictionary of detected secrets
+    """
+    if mode == 'ai' and AI_MODE_AVAILABLE:
+        pipeline = get_pipeline()
+        result = pipeline.detect(text, detect_pii=False, detect_harmful=False)
+        
+        if result.detections:
+            return {
+                'SECRETS': [
+                    {
+                        'span': det.text,
+                        'start': det.start,
+                        'end': det.end
+                    }
+                    for det in result.detections
+                ]
+            }
+        return {}
+    else:
+        return detect_secrets_regex(text)
+
+
+def detect_harmful(text: str, mode: str = 'regex'):
+    """
+    Detect harmful content with specified mode
+    
+    Args:
+        text: Input text
+        mode: 'regex' or 'ai'
+    
+    Returns:
+        Dictionary with harmful content analysis
+    """
+    if mode == 'ai' and AI_MODE_AVAILABLE:
+        pipeline = get_pipeline()
+        result = pipeline.detect(text, detect_pii=False, detect_secrets=False)
+        
+        return {
+            'harmful': result.harmful,
+            'severity': result.severity,
+            'scores': result.harmful_scores
+        }
+    else:
+        return detect_harmful_regex(text)
 
 
 # ==================== VERSION ====================
@@ -265,29 +366,31 @@ except ImportError:
         from setuptools_scm import get_version
         __version__ = get_version(root='..', relative_to=__file__)
     except (ImportError, LookupError):
-        __version__ = "unknown"
+        __version__ = '0.3.0'
 
 
 # ==================== EXPORTS ====================
 __all__ = [
-    # NEW API (Recommended)
-    'ZeroHarmPipeline',
-    'PipelineConfig',
-    'RedactionStrategy',
-    'DetectionType',
-    'Detection',
-    'PipelineResult',
-    'detect_all_threats',
-    'get_pipeline',
-    'AI_DETECTION_AVAILABLE',
-    
-    # Unified convenience functions
+    # Main API
+    'ZeroHarmDetector',
+    'detect',
     'detect_pii',
     'detect_secrets',
     'detect_harmful',
     'redact_text',
     
-    # Legacy classes (for backward compatibility)
+    # AI Mode (None if not available)
+    'AIPipeline',
+    'PipelineConfig',
+    'AIRedactionStrategy',
+    'DetectionType',
+    'Detection',
+    'PipelineResult',
+    'AIPIIDetector',
+    'AIHarmfulDetector',
+    'get_pipeline',
+    
+    # Regex Mode (always available)
     'EmailDetector',
     'PhoneDetector',
     'SSNDetector',
@@ -298,8 +401,12 @@ __all__ = [
     'MRNDetector',
     'PersonNameDetector',
     'AddressDetector',
-    'HarmfulTextDetector',  # Added for backward compatibility
-    'HarmfulTextDetectorLegacy',
+    'SecretsDetector',
+    'RegexHarmfulDetector',
+    'RegexRedactionStrategy',
     'DetectionConfig',
-    'default_detectors',
+    
+    # Metadata
+    'AI_MODE_AVAILABLE',
+    '__version__',
 ]

@@ -1,3 +1,11 @@
+"""
+Regex-based PII and secrets detection
+
+Fast pattern-based detection for structured data.
+Part of the free tier in the freemium model.
+
+File: zero_harm_ai_detectors/regex_detectors.py
+"""
 import re
 import hashlib
 from enum import Enum
@@ -354,3 +362,4 @@ def detect_secrets(text: str) -> Dict[str, List[Dict[str, Any]]]:
     if findings:
         return {"SECRETS": findings}
     return {}
+
