@@ -6,7 +6,7 @@ import os
 # Add the parent directory to the path so we can import our module
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from zero_harm_ai_detectors import detect_pii, detect_secrets, HarmfulTextDetector, DetectionConfig  # Changed import
+from zero_harm_ai_detectors import detect_pii, detect_secrets, DetectionConfig, detect_harmful
 
 def test_detects_email_and_ssn():
     """Test that email and SSN detection works"""

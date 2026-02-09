@@ -41,7 +41,6 @@ from .regex_detectors import (
 
 from .regex_harmful_detectors import (
     detect_harmful as detect_harmful_regex,
-    HarmfulTextDetector as RegexHarmfulDetector,
     DetectionConfig,
 )
 
