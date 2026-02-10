@@ -10,13 +10,13 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from zero_harm_ai_detectors import (
-    AI_DETECTION_AVAILABLE,
+    AI_MODE_AVAILABLE,
     detect_pii,
     detect_secrets,
 )
 
 # Only import AI-specific classes if available
-if AI_DETECTION_AVAILABLE:
+if AI_MODE_AVAILABLE:
     from zero_harm_ai_detectors import (
         ZeroHarmDetector,
         PipelineConfig,
@@ -27,7 +27,7 @@ if AI_DETECTION_AVAILABLE:
 @pytest.fixture
 def pipeline():
     """Create a pipeline instance for testing"""
-    if not AI_DETECTION_AVAILABLE:
+    if not AI_MODE_AVAILABLE:
         pytest.skip("AI detection not available")
     return ZeroHarmDetector(mode='ai')
 
@@ -50,7 +50,7 @@ def test_texts():
 
 
 # ==================== Basic Detection Tests ====================
-@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
+@pytest.mark.skipif(not AI_MODE_AVAILABLE, reason="AI detection not available")
 def test_email_detection(pipeline, test_texts):
     """Test email detection"""
     result = pipeline.detect(test_texts["email"])
@@ -59,7 +59,7 @@ def test_email_detection(pipeline, test_texts):
     assert 'EMAIL' in result['detections']
 
 
-@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
+@pytest.mark.skipif(not AI_MODE_AVAILABLE, reason="AI detection not available")
 def test_phone_detection(pipeline, test_texts):
     """Test phone number detection"""
     result = pipeline.detect(test_texts["phone"])
@@ -67,7 +67,7 @@ def test_phone_detection(pipeline, test_texts):
     assert 'PHONE' in result['detections']
 
 
-@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
+@pytest.mark.skipif(not AI_MODE_AVAILABLE, reason="AI detection not available")
 def test_ssn_detection(pipeline, test_texts):
     """Test SSN detection"""
     result = pipeline.detect(test_texts["ssn"])
@@ -75,7 +75,7 @@ def test_ssn_detection(pipeline, test_texts):
     assert 'SSN' in result['detections']
 
 
-@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
+@pytest.mark.skipif(not AI_MODE_AVAILABLE, reason="AI detection not available")
 def test_person_name_detection(pipeline, test_texts):
     """Test person name detection with AI"""
     result = pipeline.detect(test_texts["person"])
@@ -83,7 +83,7 @@ def test_person_name_detection(pipeline, test_texts):
     assert 'PERSON' in result['detections']
 
 
-@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
+@pytest.mark.skipif(not AI_MODE_AVAILABLE, reason="AI detection not available")
 def test_location_detection(pipeline, test_texts):
     """Test location detection (AI feature)"""
     result = pipeline.detect(test_texts["location"])
@@ -91,7 +91,7 @@ def test_location_detection(pipeline, test_texts):
     assert 'LOCATION' in result['detections']
 
 
-@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
+@pytest.mark.skipif(not AI_MODE_AVAILABLE, reason="AI detection not available")
 def test_organization_detection(pipeline, test_texts):
     """Test organization detection (AI feature)"""
     result = pipeline.detect(test_texts["org"])
@@ -99,7 +99,7 @@ def test_organization_detection(pipeline, test_texts):
     assert 'ORGANIZATION' in result['detections']
 
 
-@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
+@pytest.mark.skipif(not AI_MODE_AVAILABLE, reason="AI detection not available")
 def test_secret_detection(pipeline, test_texts):
     """Test API key/secret detection"""
     result = pipeline.detect(test_texts["secret"])
@@ -107,7 +107,7 @@ def test_secret_detection(pipeline, test_texts):
     assert 'SECRETS' in result['detections']
 
 
-@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
+@pytest.mark.skipif(not AI_MODE_AVAILABLE, reason="AI detection not available")
 def test_harmful_content_detection(pipeline, test_texts):
     """Test harmful content detection"""
     result = pipeline.detect(test_texts["harmful"])
@@ -116,7 +116,7 @@ def test_harmful_content_detection(pipeline, test_texts):
     assert result['severity'] in ["low", "medium", "high"]
 
 
-@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
+@pytest.mark.skipif(not AI_MODE_AVAILABLE, reason="AI detection not available")
 def test_credit_card_detection(pipeline, test_texts):
     """Test credit card detection"""
     result = pipeline.detect(test_texts["credit_card"])
@@ -145,7 +145,7 @@ def test_legacy_detect_secrets(test_texts):
 
 
 # ==================== Edge Cases ====================
-@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
+@pytest.mark.skipif(not AI_MODE_AVAILABLE, reason="AI detection not available")
 def test_empty_text(pipeline):
     """Test with empty text"""
     result = pipeline.detect("")
@@ -154,7 +154,7 @@ def test_empty_text(pipeline):
     assert result['redacted'] == ""
 
 
-@pytest.mark.skipif(not AI_DETECTION_AVAILABLE, reason="AI detection not available")
+@pytest.mark.skipif(not AI_MODE_AVAILABLE, reason="AI detection not available")
 def test_no_sensitive_content(pipeline):
     """Test with text containing no sensitive data"""
     result = pipeline.detect("Hello world! How are you today?")
