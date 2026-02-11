@@ -14,6 +14,9 @@ from transformers import (
 )
 import torch
 
+from .input_validation import validate_input
+
+
 # ==================== Configuration ====================
 @dataclass
 class PipelineConfig:
@@ -158,6 +161,7 @@ class AIPIIDetector:
         
     def detect(self, text: str) -> List[Detection]:
         """Detect PII in text using AI and structured patterns"""
+        text = validate_input(text, mode='ai') # Validate input for AI mode
         detections = []
         
         # 1. AI-based NER detection

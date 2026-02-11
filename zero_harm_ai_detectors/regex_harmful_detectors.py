@@ -20,6 +20,8 @@ import re
 from dataclasses import dataclass
 from typing import Dict, List, Any
 
+from .input_validation import validate_input
+
 # ==================== Configuration ====================
 @dataclass
 class DetectionConfig:
@@ -230,6 +232,7 @@ class HarmfulTextDetector:
         Returns:
             Dictionary with HARMFUL_CONTENT key if harmful content detected
         """
+        text = validate_input(text, mode='regex')  # Validate input for regex mode
         # Count matches for each category
         toxic_matches = self.patterns.TOXIC.findall(text)
         threat_matches = self.patterns.THREAT.findall(text)
@@ -323,5 +326,6 @@ def detect_harmful(text: str, config: DetectionConfig = None) -> Dict[str, List[
         findings = detect_harmful("I hate you!")
         # Returns: {'HARMFUL_CONTENT': [{'span': 'I hate you!', ...}]}
     """
+    text = validate_input(text, mode='regex')  # Validate input for regex mode
     detector = HarmfulTextDetector(config)
     return detector.detect(text)

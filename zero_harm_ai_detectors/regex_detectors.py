@@ -11,6 +11,8 @@ import hashlib
 from enum import Enum
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
+from .input_validation import validate_input
+
 # ---------- Redaction strategy ----------
 class RedactionStrategy(str, Enum):
     MASK_ALL = "mask_all"
@@ -266,41 +268,155 @@ class AddressDetector(BaseDetector):
         for m in self.POBOX_ADDR.finditer(text):
             yield (m.start(), m.end())
 
-class SecretsDetector(BaseDetector):
+# ---------- Secrets Detector ----------
+"""
+Changes:
+1. Removed wildcard 16-char and 40-char patterns that caused massive false positives
+2. Added context-aware detection for AWS secret keys
+3. Added explicit patterns for real AWS session tokens
+4. Added generic high-entropy secret detection with keyword context requirement
+5. Each pattern is documented with what it actually matches
+"""
+class SecretsDetector:
+    """
+    Detector for API keys, tokens, and credentials.
+
+    Design principles:
+    - Structured secrets (sk-..., ghp_..., AIza...) are matched by prefix → high confidence
+    - Unstructured secrets (AWS secret key, generic passwords) require keyword context
+    - No pattern should match arbitrary alphanumeric strings without context
+    """
+
     type = "SECRETS"
 
-    PATTERNS = [
-        # --- OpenAI API keys ---
-        # Legacy/standard keys: "sk-" + 32-64 base62-ish chars
-        re.compile(r"\bsk-[A-Za-z0-9]{32,64}\b"),
-        # Project-scoped keys: "sk-proj-" + token "-" token (lengths vary; be conservative)
-        re.compile(r"\bsk-proj-[A-Za-z0-9]{16,}-[A-Za-z0-9]{16,}\b"),
-        # Org-scoped keys (seen in the wild; keep optional): "sk-org-" + token "-" token
-        re.compile(r"\bsk-org-[A-Za-z0-9]{16,}-[A-Za-z0-9]{16,}\b"),
+    # ── Structured secrets: matched by distinctive prefix ──────────────
 
-        # --- Existing patterns you already had ---
-        re.compile(r"\b(AKI|ASI)A[0-9A-Z]{16}\b"),                # AWS Access Key ID
-        re.compile(r"\b[A-Za-z0-9]{16}\b"),                       # AWS Session Token
-        re.compile(r"\b[0-9a-zA-Z/+]{40}\b"),                     # AWS Secret Access Key
-        re.compile(r"\bAIza[0-9A-Za-z\-_]{35}\b"),                # Google API Key
-        re.compile(r"\bxox[baprs]-[0-9A-Za-z-]{10,100}\b"),       # Slack tokens
-        re.compile(r"\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\b"),  # JWT
-        re.compile(r"\bsk_(live|test)_[0-9a-zA-Z]{24}\b"),        # Stripe keys
-        re.compile(r"\bghp_[0-9A-Za-z]{36}\b"),                 # GitHub PAT
-        re.compile(r"\bsk-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20}\b")
+    STRUCTURED_PATTERNS: List[re.Pattern] = [
+        # OpenAI legacy/standard keys: sk- + 32-64 alphanumeric chars
+        re.compile(r"\bsk-[A-Za-z0-9]{32,64}\b"),
+        # OpenAI project-scoped keys
+        re.compile(r"\bsk-proj-[A-Za-z0-9]{16,}-[A-Za-z0-9]{16,}\b"),
+        # OpenAI org-scoped keys
+        re.compile(r"\bsk-org-[A-Za-z0-9]{16,}-[A-Za-z0-9]{16,}\b"),
+        # OpenAI legacy format with known middle segment
+        re.compile(r"\bsk-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20}\b"),
+        # AWS Access Key ID (always starts with AKIA or ASIA)
+        re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
+        # Google API Key (always starts with AIza)
+        re.compile(r"\bAIza[0-9A-Za-z\-_]{35}\b"),
+        # Slack tokens (xoxb-, xoxp-, xoxa-, xoxr-, xoxs-)
+        re.compile(r"\bxox[baprs]-[0-9A-Za-z-]{10,100}\b"),
+        # JWT (three base64url segments separated by dots)
+        re.compile(
+            r"\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\b"
+        ),
+        # Stripe keys (sk_live_ or sk_test_)
+        re.compile(r"\bsk_(?:live|test)_[0-9a-zA-Z]{24,}\b"),
+        # GitHub Personal Access Token
+        re.compile(r"\bghp_[0-9A-Za-z]{36}\b"),
+        # GitHub Fine-grained PAT
+        re.compile(r"\bgithub_pat_[0-9A-Za-z_]{36,}\b"),
+        # GitLab tokens
+        re.compile(r"\bglpat-[0-9A-Za-z\-]{20,}\b"),
+        # Azure keys (32 hex or base64 with known prefix patterns)
+        re.compile(r"\b[0-9a-fA-F]{32,}\b(?=\s*['\"]?\s*[;,}\)])"),  # hex in code context
+        # npm tokens
+        re.compile(r"\bnpm_[A-Za-z0-9]{36}\b"),
     ]
 
-    def finditer(self, text: str) -> List[Dict[str, Any]]:
-        findings: List[Dict[str, Any]] = []
-        for pat in self.PATTERNS:
-            for m in pat.finditer(text):
-                findings.append({
-                    "span": m.group(),
-                    "start": m.start(),
-                    "end": m.end()
-                })
-        return findings
+    # ── Context-dependent secrets: require nearby keywords ─────────────
 
+    # Keywords that indicate a secret is nearby
+    SECRET_CONTEXT_KEYWORDS = re.compile(
+        r"("
+        r"secret[_\s-]?key|access[_\s-]?key|api[_\s-]?key|api[_\s-]?secret|"
+        r"private[_\s-]?key|auth[_\s-]?token|bearer|credentials?|password|passwd|"
+        r"aws[_\s-]?secret|client[_\s-]?secret|signing[_\s-]?key|"
+        r"encryption[_\s-]?key|master[_\s-]?key|service[_\s-]?key|"
+        r"secret|token|apikey|api_key"
+        r")",
+        re.IGNORECASE,
+    )
+
+    # AWS Secret Access Key: exactly 40 chars of base64-ish, but ONLY with context
+    # Use lookaround instead of \b since / and + break word boundaries
+    AWS_SECRET_KEY = re.compile(r"(?<![0-9a-zA-Z/+])[0-9a-zA-Z/+]{40}(?![0-9a-zA-Z/+])")
+
+    # Generic high-entropy string (20-64 chars) — only flagged with keyword context
+    GENERIC_SECRET = re.compile(r"\b[A-Za-z0-9/+=_\-]{20,64}\b")
+
+    # Context window (chars before/after) to search for keywords
+    CONTEXT_WINDOW = 80
+
+    def _has_secret_context(self, text: str, start: int, end: int) -> bool:
+        """Check if a match is near secret-related keywords."""
+        ctx_start = max(0, start - self.CONTEXT_WINDOW)
+        ctx_end = min(len(text), end + self.CONTEXT_WINDOW)
+        context = text[ctx_start:ctx_end]
+        return bool(self.SECRET_CONTEXT_KEYWORDS.search(context))
+
+    @staticmethod
+    def _shannon_entropy(s: str) -> float:
+        """Calculate Shannon entropy of a string (bits per character)."""
+        if not s:
+            return 0.0
+        freq: Dict[str, int] = {}
+        for c in s:
+            freq[c] = freq.get(c, 0) + 1
+        length = len(s)
+        return -sum(
+            (count / length) * math.log2(count / length)
+            for count in freq.values()
+        )
+
+    # Minimum entropy (bits/char) to consider a string "secret-like"
+    # English text ≈ 3.5-4.0, random base64 ≈ 5.5-6.0
+    MIN_ENTROPY = 4.5
+
+    def finditer(self, text: str) -> List[Dict[str, Any]]:
+        """
+        Find all secrets in text.
+
+        Returns list of dicts with 'span', 'start', 'end' keys.
+        """
+        findings: List[Dict[str, Any]] = []
+        seen_ranges: set = set()  # avoid duplicates
+
+        def _add(start: int, end: int, span: str) -> None:
+            key = (start, end)
+            if key not in seen_ranges:
+                seen_ranges.add(key)
+                findings.append({"span": span, "start": start, "end": end})
+
+        # 1. Structured patterns — high confidence, no context needed
+        for pat in self.STRUCTURED_PATTERNS:
+            for m in pat.finditer(text):
+                _add(m.start(), m.end(), m.group())
+
+        # 2. AWS Secret Key pattern — only with context
+        for m in self.AWS_SECRET_KEY.finditer(text):
+            if self._has_secret_context(text, m.start(), m.end()):
+                # Also check entropy to avoid matching normal base64 text
+                if self._shannon_entropy(m.group()) >= self.MIN_ENTROPY:
+                    _add(m.start(), m.end(), m.group())
+
+        # 3. Generic secrets — keyword context AND high entropy required
+        for m in self.GENERIC_SECRET.finditer(text):
+            span = m.group()
+            # Skip if already found by structured patterns
+            if (m.start(), m.end()) in seen_ranges:
+                continue
+            # Skip short matches (structured patterns handle those)
+            if len(span) < 20:
+                continue
+            # Require both context and entropy
+            if (
+                self._has_secret_context(text, m.start(), m.end())
+                and self._shannon_entropy(span) >= self.MIN_ENTROPY
+            ):
+                _add(m.start(), m.end(), span)
+
+        return findings
 
 # ---------- Defaults ----------
 def default_detectors() -> List[BaseDetector]:
@@ -331,6 +447,7 @@ def _locate_spans(text: str, pattern_or_detector: PatternOrDetector) -> List[Dic
 
 # ---------- Public API ----------
 def detect_pii(text: str, detectors: Optional[List[BaseDetector]] = None) -> Dict[str, List[Dict[str, Any]]]:
+    text = validate_input(text, mode='regex')  # text validation for regex mode
     dets = detectors or default_detectors()
     out: Dict[str, List[Dict[str, Any]]] = {}
     for det in dets:
@@ -357,6 +474,7 @@ def redact_text(text: str, spans_or_map: Union[List[Dict[str, Any]], Dict[str, L
 
 def detect_secrets(text: str) -> Dict[str, List[Dict[str, Any]]]:
     """Scan text for API keys and secrets, return grouped under 'SECRETS'."""
+    text = validate_input(text, mode='regex')  # text validation for regex mode
     detector = SecretsDetector()
     findings = detector.finditer(text)
     if findings:

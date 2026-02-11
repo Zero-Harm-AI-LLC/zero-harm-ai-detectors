@@ -18,6 +18,17 @@ Usage:
 
 File: zero_harm_ai_detectors/__init__.py
 """
+# ==================== IMPORTS ====================
+from .input_validation import (
+    validate_input,
+    validate_input_soft,
+    InputConfig,
+    InputValidationError,
+    InputTooLongError,
+    AI_MODE_CONFIG,
+    REGEX_MODE_CONFIG,
+    API_MODE_CONFIG,
+)
 
 # ==================== REGEX MODE (FREE TIER) ====================
 from .regex_detectors import (
@@ -135,7 +146,7 @@ class ZeroHarmDetector:
         else:
             # Regex mode - no initialization needed
             self._pipeline = None
-    
+
     def detect(
         self,
         text: str,
@@ -158,6 +169,9 @@ class ZeroHarmDetector:
             AI mode: PipelineResult object
             Regex mode: Dictionary with detection results
         """
+        # >>> NEW: Input validation <<<
+        text = validate_input(text, mode=self.mode)
+        
         if self.mode == 'ai':
             return self._detect_ai(
                 text, redaction_strategy, 
@@ -274,19 +288,18 @@ def detect(text: str, mode: str = 'regex', **kwargs):
 def detect_pii(text: str, mode: str = 'regex'):
     """
     Detect PII with specified mode
-    
+
     Args:
         text: Input text
         mode: 'regex' or 'ai'
-    
+
     Returns:
         Dictionary of detected PII by type
     """
+    text = validate_input(text, mode=mode)  # <<< NEW
     if mode == 'ai' and AI_MODE_AVAILABLE:
         pipeline = get_pipeline()
         result = pipeline.detect(text, detect_secrets=False, detect_harmful=False)
-        
-        # Convert to common format
         grouped = {}
         for det in result.detections:
             if det.type not in grouped:
@@ -313,6 +326,7 @@ def detect_secrets(text: str, mode: str = 'regex'):
     Returns:
         Dictionary of detected secrets
     """
+    text = validate_input(text, mode=mode)
     if mode == 'ai' and AI_MODE_AVAILABLE:
         pipeline = get_pipeline()
         result = pipeline.detect(text, detect_pii=False, detect_harmful=False)
@@ -344,6 +358,7 @@ def detect_harmful(text: str, mode: str = 'regex'):
     Returns:
         Dictionary with harmful content analysis
     """
+    text = validate_input(text, mode=mode) 
     if mode == 'ai' and AI_MODE_AVAILABLE:
         pipeline = get_pipeline()
         result = pipeline.detect(text, detect_pii=False, detect_secrets=False)
@@ -405,6 +420,16 @@ __all__ = [
     'RegexRedactionStrategy',
     'DetectionConfig',
     
+    # Input validation (NEW)
+    'validate_input',
+    'validate_input_soft',
+    'InputConfig',
+    'InputValidationError',
+    'InputTooLongError',
+    'AI_MODE_CONFIG',
+    'REGEX_MODE_CONFIG',
+    'API_MODE_CONFIG',
+
     # Metadata
     'AI_MODE_AVAILABLE',
     '__version__',
