@@ -338,7 +338,7 @@ class HarmfulContentDetector:
             "text-classification",
             model=self.model,
             tokenizer=self.tokenizer,
-            return_all_scores=True,
+            top_k=None,
             function_to_apply="sigmoid",
             device=self.device
         )
