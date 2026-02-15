@@ -14,7 +14,7 @@ permissions:
 jobs:
   test-basic:
     runs-on: ubuntu-latest
-    name: Basic Tests (Regex Only)
+    name: Basic Tests (Regex + Core Patterns)
     
     steps:
     - uses: actions/checkout@v4
@@ -34,10 +34,9 @@ jobs:
     - name: Install package (base only)
       run: pip install -e .
     
-    - name: Run basic tests
+    - name: Run regex and core pattern tests
       run: |
-        # Only run tests that don't require AI
-        pytest tests/test_detectors.py --cov=zero_harm_ai_detectors --cov-report=xml
+        pytest tests/test_regex_detectors.py tests/test_core_patterns.py -v --cov=zero_harm_ai_detectors --cov-report=xml
     
     - name: Lint with flake8
       run: |

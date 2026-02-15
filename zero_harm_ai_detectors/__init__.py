@@ -19,6 +19,8 @@ Usage:
 File: zero_harm_ai_detectors/__init__.py
 """
 # ==================== IMPORTS ====================
+from .core_patterns import RedactionStrategy
+
 from .input_validation import (
     validate_input,
     validate_input_soft,
@@ -53,8 +55,8 @@ from .regex_detectors import (
 from .regex_harmful_detectors import (
     detect_harmful as detect_harmful_regex,
     DetectionConfig,
+    HarmfulTextDetector,  # add this if not already imported
 )
-
 
 # ==================== AI MODE (PAID TIER) ====================
 try:
@@ -380,7 +382,7 @@ except ImportError:
         from setuptools_scm import get_version
         __version__ = get_version(root='..', relative_to=__file__)
     except (ImportError, LookupError):
-        __version__ = '0.3.0'
+        __version__ = '0.0.0-unknown'
 
 
 # ==================== EXPORTS ====================
@@ -416,7 +418,7 @@ __all__ = [
     'PersonNameDetector',
     'AddressDetector',
     'SecretsDetector',
-    'RegexHarmfulDetector',
+    'HarmfulTextDetector',
     'RegexRedactionStrategy',
     'DetectionConfig',
     
