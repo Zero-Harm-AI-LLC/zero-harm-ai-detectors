@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "zero_harm_ai_detectors"
 dynamic = ["version"]
-description = "AI-powered privacy and harmful content detection library"
+description = "AI-powered privacy and harmful content detection library with freemium tiers"
 authors = [
     {name = "Zero Harm AI LLC", email = "info@zeroharmai.com"}
 ]
@@ -24,10 +24,10 @@ classifiers = [
     "Topic :: Security",
     "Topic :: Text Processing :: Linguistic",
 ]
+keywords = ["pii", "privacy", "security", "ai", "detection", "harmful-content", "secrets"]
 
 dependencies = [
     "regex>=2022.1.18",
-    "numpy>=1.21.0",
 ]
 
 [project.optional-dependencies]
@@ -43,6 +43,7 @@ dev = [
     "pytest-cov>=4.1.0",
     "black>=23.0.0",
     "flake8>=6.0.0",
+    "mypy>=1.0.0",
 ]
 
 all = [
@@ -59,6 +60,7 @@ all = [
 [project.urls]
 Homepage = "https://github.com/Zero-Harm-AI-LLC/zero-harm-ai-detectors"
 Repository = "https://github.com/Zero-Harm-AI-LLC/zero-harm-ai-detectors"
+Documentation = "https://zeroharmai.com/docs"
 Issues = "https://github.com/Zero-Harm-AI-LLC/zero-harm-ai-detectors/issues"
 
 [tool.setuptools.packages.find]
@@ -78,3 +80,9 @@ addopts = "-v --cov=zero_harm_ai_detectors --cov-report=term-missing"
 [tool.black]
 line-length = 100
 target-version = ["py38", "py39", "py310", "py311"]
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
