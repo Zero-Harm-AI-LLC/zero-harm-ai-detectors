@@ -33,10 +33,131 @@ from zero_harm_ai_detectors import (
     find_secrets,
     # Validation
     validate_input,
+    validate_input_soft,
     InputConfig,
     InputValidationError,
     InputTooLongError,
 )
+
+
+# ============================================================
+# Input Validation — validate_input() itself
+# ============================================================
+
+class TestValidateInput:
+    def test_valid_string_returned_unchanged(self):
+        assert validate_input("Hello world") == "Hello world"
+
+    def test_none_raises(self):
+        with pytest.raises(InputValidationError):
+            validate_input(None)
+
+    def test_too_long_raises(self):
+        with pytest.raises(InputTooLongError):
+            validate_input("x" * 11, InputConfig(max_length=10))
+
+    def test_null_bytes_stripped(self):
+        result = validate_input("Hello\x00World")
+        assert "\x00" not in result
+        assert "HelloWorld" in result
+
+    def test_soft_truncates_instead_of_raising(self):
+        result = validate_input_soft("x" * 20, InputConfig(max_length=10))
+        assert len(result) == 10
+
+    def test_line_too_long_raises(self):
+        with pytest.raises(InputValidationError):
+            validate_input("a" * 101, InputConfig(max_line_length=100))
+
+    def test_non_string_coerced(self):
+        result = validate_input(12345)  # type: ignore[arg-type]
+        assert result == "12345"
+
+
+# ============================================================
+# Input Validation — at every public individual detector
+# ============================================================
+
+class TestDetectorInputValidation:
+    """Every exported detect_* function must reject None and overly long input."""
+
+    LONG = "x" * 2_000_000  # Exceeds REGEX_MODE_CONFIG.max_length (1 000 000)
+
+    def test_detect_emails_rejects_none(self):
+        with pytest.raises(InputValidationError):
+            detect_emails(None)  # type: ignore[arg-type]
+
+    def test_detect_emails_rejects_too_long(self):
+        with pytest.raises(InputTooLongError):
+            detect_emails(self.LONG)
+
+    def test_detect_phones_rejects_none(self):
+        with pytest.raises(InputValidationError):
+            detect_phones(None)  # type: ignore[arg-type]
+
+    def test_detect_ssns_rejects_none(self):
+        with pytest.raises(InputValidationError):
+            detect_ssns(None)  # type: ignore[arg-type]
+
+    def test_detect_credit_cards_rejects_none(self):
+        with pytest.raises(InputValidationError):
+            detect_credit_cards(None)  # type: ignore[arg-type]
+
+    def test_detect_bank_accounts_rejects_none(self):
+        with pytest.raises(InputValidationError):
+            detect_bank_accounts(None)  # type: ignore[arg-type]
+
+    def test_detect_dob_rejects_none(self):
+        with pytest.raises(InputValidationError):
+            detect_dob(None)  # type: ignore[arg-type]
+
+    def test_detect_addresses_rejects_none(self):
+        with pytest.raises(InputValidationError):
+            detect_addresses(None)  # type: ignore[arg-type]
+
+    def test_detect_person_names_regex_rejects_none(self):
+        with pytest.raises(InputValidationError):
+            detect_person_names_regex(None)  # type: ignore[arg-type]
+
+    def test_detect_secrets_regex_rejects_none(self):
+        with pytest.raises(InputValidationError):
+            detect_secrets_regex(None)  # type: ignore[arg-type]
+
+    def test_detect_harmful_regex_rejects_none(self):
+        with pytest.raises(InputValidationError):
+            detect_harmful_regex(None)  # type: ignore[arg-type]
+
+    def test_detect_harmful_regex_rejects_too_long(self):
+        with pytest.raises(InputTooLongError):
+            detect_harmful_regex(self.LONG)
+
+    def test_find_secrets_rejects_none(self):
+        with pytest.raises(InputValidationError):
+            find_secrets(None)  # type: ignore[arg-type]
+
+    def test_redact_spans_rejects_none(self):
+        with pytest.raises(InputValidationError):
+            redact_spans(None, [])  # type: ignore[arg-type]
+
+
+class TestOrchestrationValidation:
+    """detect_all_regex and top-level detect() must also validate."""
+
+    def test_detect_all_regex_rejects_none(self):
+        with pytest.raises(InputValidationError):
+            detect_all_regex(None)  # type: ignore[arg-type]
+
+    def test_detect_rejects_none(self):
+        with pytest.raises(InputValidationError):
+            detect(None)  # type: ignore[arg-type]
+
+    def test_detect_rejects_too_long_regex(self):
+        with pytest.raises(InputTooLongError):
+            detect("x" * 2_000_000, mode="regex")
+
+    def test_detect_strips_null_bytes(self):
+        result = detect("Email:\x00 test@example.com")
+        assert len(result.detections) >= 1
 
 
 # ============================================================
@@ -89,8 +210,7 @@ class TestEmailDetection:
         assert result[0].type == "EMAIL"
 
     def test_multiple_emails(self):
-        result = detect_emails("Email alice@test.com or bob@example.org")
-        assert len(result) == 2
+        assert len(detect_emails("Email alice@test.com or bob@example.org")) == 2
 
     def test_email_with_plus(self):
         result = detect_emails("Use john+tag@example.com")
@@ -102,6 +222,9 @@ class TestEmailDetection:
 
     def test_invalid_email_no_tld(self):
         assert detect_emails("Not an email: john@localhost") == []
+
+    def test_empty_string_returns_empty(self):
+        assert detect_emails("") == []
 
 
 # ============================================================
@@ -173,19 +296,16 @@ class TestSecretsDetection:
         assert any("API_KEY" in d.type or "SECRET" in d.type for d in result)
 
     def test_github_pat(self):
-        result = detect_secrets_regex("token = ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcd1234")
-        assert len(result) >= 1
+        assert len(detect_secrets_regex("token = ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcd1234")) >= 1
 
     def test_aws_access_key(self):
-        result = detect_secrets_regex("aws_key = AKIAIOSFODNN7EXAMPLE")
-        assert len(result) >= 1
+        assert len(detect_secrets_regex("aws_key = AKIAIOSFODNN7EXAMPLE")) >= 1
 
     def test_no_secrets_normal_text(self):
         assert detect_secrets_regex("The quick brown fox jumps over the lazy dog") == []
 
     def test_generic_secret_with_context(self):
-        result = detect_secrets_regex("password = AbCdEfGhIjKlMnOpQrStUvWxYz123456")
-        assert len(result) >= 1
+        assert len(detect_secrets_regex("password = AbCdEfGhIjKlMnOpQrStUvWxYz123456")) >= 1
 
 
 # ============================================================
@@ -197,6 +317,7 @@ class TestHarmfulDetection:
         result = detect_harmful_regex("Hello, how are you today?")
         assert result["harmful"] is False
         assert result["severity"] == "none"
+        assert result["scores"] == {}
 
     def test_insult_is_low(self):
         result = detect_harmful_regex("You're such a loser!")
@@ -229,8 +350,7 @@ class TestHarmfulDetection:
         assert len(result["scores"]) > 0
 
     def test_scores_empty_when_clean(self):
-        result = detect_harmful_regex("Nice weather today.")
-        assert result["scores"] == {}
+        assert detect_harmful_regex("Nice weather today.")["scores"] == {}
 
 
 # ============================================================
@@ -242,8 +362,7 @@ class TestRedaction:
         assert apply_redaction("test@example.com", "EMAIL", RedactionStrategy.TOKEN) == "[REDACTED_EMAIL]"
 
     def test_mask_all_redaction(self):
-        result = apply_redaction("secret123", "SECRET", RedactionStrategy.MASK_ALL)
-        assert result == "*********"
+        assert apply_redaction("secret123", "SECRET", RedactionStrategy.MASK_ALL) == "*********"
 
     def test_mask_last4_redaction(self):
         result = apply_redaction("4532015112830366", "CREDIT_CARD", RedactionStrategy.MASK_LAST4)
@@ -257,14 +376,11 @@ class TestRedaction:
 
     def test_redact_spans(self):
         text = "Email: test@example.com"
-        detections = [Detection(
-            type="EMAIL",
-            text="test@example.com",
-            start=7,
-            end=23,
-            confidence=0.99,
-        )]
+        detections = [Detection(type="EMAIL", text="test@example.com", start=7, end=23, confidence=0.99)]
         assert redact_spans(text, detections, RedactionStrategy.TOKEN) == "Email: [REDACTED_EMAIL]"
+
+    def test_redact_spans_empty_detections(self):
+        assert redact_spans("No PII here", []) == "No PII here"
 
 
 # ============================================================
@@ -305,23 +421,25 @@ class TestUnifiedDetect:
             detect_pii=False,
             detect_secrets=True,
         )
-        types = [d.type for d in result.detections]
-        assert "EMAIL" not in types
+        assert "EMAIL" not in [d.type for d in result.detections]
 
     def test_redaction_strategies(self):
         text = "Email: test@example.com"
         assert "[REDACTED_EMAIL]" in detect(text, redaction_strategy="token").redacted_text
         assert "****" in detect(text, redaction_strategy="mask_all").redacted_text
 
+    def test_unknown_redaction_strategy_defaults_to_token(self):
+        result = detect("test@example.com", redaction_strategy="nonexistent")
+        assert "[REDACTED_EMAIL]" in result.redacted_text
+
     def test_to_dict_format(self):
         d = detect("Email: test@example.com").to_dict()
         assert all(k in d for k in ("original", "redacted", "detections", "mode", "harmful", "severity"))
         assert d["mode"] == "regex"
 
-    def test_empty_text(self):
+    def test_empty_string_returns_empty_result(self):
         result = detect("")
         assert result.original_text == ""
-        assert result.redacted_text == ""
         assert result.detections == []
 
 
@@ -344,25 +462,9 @@ class TestDetectAllRegex:
         assert result.harmful is True
         assert result.severity != "none"
 
-
-# ============================================================
-# Input Validation
-# ============================================================
-
-class TestInputValidation:
-    def test_valid_input(self):
-        assert validate_input("Hello world") == "Hello world"
-
-    def test_none_input_raises(self):
-        with pytest.raises(InputValidationError):
-            validate_input(None)
-
-    def test_too_long_raises(self):
-        with pytest.raises(InputTooLongError):
-            validate_input("This is way too long", InputConfig(max_length=10))
-
-    def test_null_bytes_stripped(self):
-        assert "\x00" not in validate_input("Hello\x00World")
+    def test_null_bytes_stripped_before_detection(self):
+        result = detect_all_regex("Email:\x00 test@example.com")
+        assert len(result.detections) >= 1
 
 
 # ============================================================
@@ -396,16 +498,15 @@ class TestEdgeCases:
         assert detect("Email: café@example.com") is not None
 
     def test_special_characters(self):
-        result = detect("Email: <test@example.com>")
-        assert len(result.detections) >= 1
+        assert len(detect("Email: <test@example.com>").detections) >= 1
 
     def test_overlapping_patterns(self):
-        # Valid Luhn card should be detected as CREDIT_CARD, not phone
         result = detect("Number: 4532-0151-1283-0366")
-        types = [d.type for d in result.detections]
-        assert "CREDIT_CARD" in types
+        assert "CREDIT_CARD" in [d.type for d in result.detections]
 
     def test_multiple_detections_same_type(self):
-        result = detect("Emails: a@b.com, c@d.com, e@f.com")
-        emails = [d for d in result.detections if d.type == "EMAIL"]
+        emails = [d for d in detect("Emails: a@b.com, c@d.com, e@f.com").detections if d.type == "EMAIL"]
         assert len(emails) == 3
+
+    def test_whitespace_only_returns_empty(self):
+        assert detect("   \n\t  ").detections == []

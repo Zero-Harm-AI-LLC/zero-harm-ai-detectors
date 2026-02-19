@@ -407,7 +407,13 @@ def redact_spans(
     detections: List[Detection],
     strategy: RedactionStrategy = RedactionStrategy.TOKEN,
 ) -> str:
-    """Redact all detected spans in text."""
+    """
+    Redact all detected spans in text.
+
+    Validates text input before processing.
+    """
+    from .input_validation import validate_input, REGEX_MODE_CONFIG
+    text = validate_input(text, REGEX_MODE_CONFIG)
     if not detections:
         return text
 
@@ -423,7 +429,15 @@ def redact_spans(
 
 
 def find_secrets(text: str) -> List[Dict[str, Any]]:
-    """Find secrets using three-tier detection."""
+    """
+    Find secrets using three-tier detection.
+
+    Validates input before processing.
+    """
+    # Import here to avoid circular import (input_validation has no deps)
+    from .input_validation import validate_input, REGEX_MODE_CONFIG
+    text = validate_input(text, REGEX_MODE_CONFIG)
+
     secrets = []
 
     # Tier 1: Structured prefixes

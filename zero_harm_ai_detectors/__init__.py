@@ -145,6 +145,12 @@ def detect(
     if mode not in ("regex", "ai"):
         raise ValueError(f"Invalid mode: {mode!r}. Must be 'regex' or 'ai'.")
 
+    # Validate at the top-level entry point.  The individual detectors also
+    # validate, but doing it here gives a single clear error message and
+    # avoids the AI pipeline receiving bad input before we can report it.
+    _config = AI_MODE_CONFIG if mode == "ai" else REGEX_MODE_CONFIG
+    text = validate_input(text, _config)
+
     try:
         strategy = RedactionStrategy(redaction_strategy)
     except ValueError:

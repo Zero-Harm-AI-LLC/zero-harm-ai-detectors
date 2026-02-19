@@ -7,16 +7,19 @@ Fast pattern matching for structured data with 95%+ accuracy on:
 - Addresses, secrets/API keys
 - Person names (~30-40% accuracy - use AI mode for better)
 
+Every public function validates its input before processing.
+Internal _*_raw helpers accept pre-validated text and skip re-validation
+so that detect_all_regex() doesn't pay the validation cost N times.
+
 File: zero_harm_ai_detectors/regex_detectors.py
 """
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from .core_patterns import (
     Detection,
     DetectionResult,
     DetectionType,
     RedactionStrategy,
-    # Patterns
     EMAIL_RE,
     PHONE_RE,
     SSN_RE,
@@ -28,278 +31,120 @@ from .core_patterns import (
     ADDRESS_RE,
     PERSON_NAME_RE,
     HARMFUL_PATTERNS,
-    _SEVERITY_ORDER,
-    _max_severity,
-    # Functions
     luhn_check,
     find_secrets,
     redact_spans,
 )
+from .input_validation import validate_input, REGEX_MODE_CONFIG
 
 
 # ============================================================
-# Individual Detectors
+# Public individual detectors
+# Each validates input at entry before running any regex.
 # ============================================================
 
 def detect_emails(text: str) -> List[Detection]:
-    """Detect email addresses."""
-    detections = []
-    for match in EMAIL_RE.finditer(text):
-        detections.append(Detection(
-            type=DetectionType.EMAIL.value,
-            text=match.group(),
-            start=match.start(),
-            end=match.end(),
-            confidence=0.99,
-            metadata={"method": "regex"},
-        ))
-    return detections
+    """Detect email addresses. Validates input before processing."""
+    text = validate_input(text, REGEX_MODE_CONFIG)
+    return _detect_emails_raw(text)
 
 
 def detect_phones(text: str) -> List[Detection]:
-    """Detect phone numbers."""
-    detections = []
-    for match in PHONE_RE.finditer(text):
-        phone = match.group()
-        # Filter out numbers that are too short
-        digits = ''.join(c for c in phone if c.isdigit())
-        if len(digits) >= 7:
-            detections.append(Detection(
-                type=DetectionType.PHONE.value,
-                text=phone,
-                start=match.start(),
-                end=match.end(),
-                confidence=0.95,
-                metadata={"method": "regex"},
-            ))
-    return detections
+    """Detect phone numbers. Validates input before processing."""
+    text = validate_input(text, REGEX_MODE_CONFIG)
+    return _detect_phones_raw(text)
 
 
 def detect_ssns(text: str) -> List[Detection]:
-    """Detect Social Security Numbers."""
-    detections = []
-    for match in SSN_RE.finditer(text):
-        ssn = match.group()
-        digits = ''.join(c for c in ssn if c.isdigit())
-        if digits[:3] not in ('000', '666') and not digits.startswith('9'):
-            detections.append(Detection(
-                type=DetectionType.SSN.value,
-                text=ssn,
-                start=match.start(),
-                end=match.end(),
-                confidence=0.98,
-                metadata={"method": "regex"},
-            ))
-    return detections
+    """Detect Social Security Numbers. Validates input before processing."""
+    text = validate_input(text, REGEX_MODE_CONFIG)
+    return _detect_ssns_raw(text)
 
 
 def detect_credit_cards(text: str) -> List[Detection]:
-    """Detect credit card numbers with Luhn validation."""
-    detections = []
-    for match in CREDIT_CARD_RE.finditer(text):
-        card = match.group()
-        digits = ''.join(c for c in card if c.isdigit())
-        if luhn_check(digits):
-            detections.append(Detection(
-                type=DetectionType.CREDIT_CARD.value,
-                text=card,
-                start=match.start(),
-                end=match.end(),
-                confidence=0.99,
-                metadata={"method": "regex", "luhn_valid": True},
-            ))
-    return detections
+    """Detect credit card numbers with Luhn validation. Validates input before processing."""
+    text = validate_input(text, REGEX_MODE_CONFIG)
+    return _detect_credit_cards_raw(text)
 
 
 def detect_bank_accounts(text: str) -> List[Detection]:
-    """Detect bank account and routing numbers."""
-    detections = []
-    for match in BANK_ACCOUNT_RE.finditer(text):
-        detections.append(Detection(
-            type=DetectionType.BANK_ACCOUNT.value,
-            text=match.group(),
-            start=match.start(),
-            end=match.end(),
-            confidence=0.90,
-            metadata={"method": "regex"},
-        ))
-    return detections
+    """Detect bank account and routing numbers. Validates input before processing."""
+    text = validate_input(text, REGEX_MODE_CONFIG)
+    return _detect_bank_accounts_raw(text)
 
 
 def detect_dob(text: str) -> List[Detection]:
-    """Detect dates of birth."""
-    detections = []
-    for match in DOB_RE.finditer(text):
-        detections.append(Detection(
-            type=DetectionType.DOB.value,
-            text=match.group(),
-            start=match.start(),
-            end=match.end(),
-            confidence=0.85,
-            metadata={"method": "regex"},
-        ))
-    return detections
+    """Detect dates of birth. Validates input before processing."""
+    text = validate_input(text, REGEX_MODE_CONFIG)
+    return _detect_dob_raw(text)
 
 
 def detect_drivers_licenses(text: str) -> List[Detection]:
-    """Detect driver's license numbers."""
-    detections = []
-    for match in DRIVERS_LICENSE_RE.finditer(text):
-        detections.append(Detection(
-            type=DetectionType.DRIVERS_LICENSE.value,
-            text=match.group(),
-            start=match.start(),
-            end=match.end(),
-            confidence=0.75,
-            metadata={"method": "regex"},
-        ))
-    return detections
+    """Detect driver's license numbers. Validates input before processing."""
+    text = validate_input(text, REGEX_MODE_CONFIG)
+    return _detect_drivers_licenses_raw(text)
 
 
 def detect_mrn(text: str) -> List[Detection]:
-    """Detect medical record numbers."""
-    detections = []
-    for match in MRN_RE.finditer(text):
-        detections.append(Detection(
-            type=DetectionType.MEDICAL_RECORD_NUMBER.value,
-            text=match.group(),
-            start=match.start(),
-            end=match.end(),
-            confidence=0.90,
-            metadata={"method": "regex"},
-        ))
-    return detections
+    """Detect medical record numbers. Validates input before processing."""
+    text = validate_input(text, REGEX_MODE_CONFIG)
+    return _detect_mrn_raw(text)
 
 
 def detect_addresses(text: str) -> List[Detection]:
-    """Detect street addresses."""
-    detections = []
-    for match in ADDRESS_RE.finditer(text):
-        detections.append(Detection(
-            type=DetectionType.ADDRESS.value,
-            text=match.group(),
-            start=match.start(),
-            end=match.end(),
-            confidence=0.85,
-            metadata={"method": "regex"},
-        ))
-    return detections
+    """Detect street addresses. Validates input before processing."""
+    text = validate_input(text, REGEX_MODE_CONFIG)
+    return _detect_addresses_raw(text)
 
 
 def detect_person_names_regex(text: str) -> List[Detection]:
     """
     Detect person names using regex (~30-40% accuracy).
 
-    For better accuracy, use AI mode (mode='ai').
+    Validates input before processing.
+    For better accuracy use AI mode: detect(text, mode='ai').
     """
-    detections = []
-    for match in PERSON_NAME_RE.finditer(text):
-        detections.append(Detection(
-            type=DetectionType.PERSON.value,
-            text=match.group(),
-            start=match.start(),
-            end=match.end(),
-            confidence=0.35,  # Low confidence - regex isn't great for names
-            metadata={"method": "regex"},
-        ))
-    return detections
+    text = validate_input(text, REGEX_MODE_CONFIG)
+    return _detect_person_names_raw(text)
 
 
 def detect_secrets_regex(text: str) -> List[Detection]:
-    """Detect secrets and API keys using three-tier detection."""
-    detections = []
-    secrets = find_secrets(text)
+    """
+    Detect secrets and API keys using three-tier detection.
 
-    for secret in secrets:
-        det_type = (
-            DetectionType.API_KEY.value
-            if "api" in secret["type"] or "key" in secret["type"]
-            else DetectionType.SECRET.value
-        )
-        detections.append(Detection(
-            type=det_type,
-            text=secret["span"],
-            start=secret["start"],
-            end=secret["end"],
-            confidence=0.95,
-            metadata={
-                "method": "regex",
-                "secret_type": secret["type"],
-                "detection_method": secret["method"],
-            },
-        ))
-
-    return detections
+    Validates input before processing.
+    """
+    text = validate_input(text, REGEX_MODE_CONFIG)
+    return _detect_secrets_raw(text)
 
 
 def detect_harmful_regex(text: str) -> Dict[str, Any]:
     """
     Detect harmful content using regex patterns.
 
-    Uses multi-factor severity logic:
-    - identity_hate or threat_phrases → always 'high'
-    - Multiple threat words OR high total match count → 'high'
-    - Any threat word or mid-range total → 'medium'
-    - Low-count insults/toxic/obscene → 'low'
+    Validates input before processing.
+
+    Multi-factor severity rules:
+    - identity_hate or threat_phrases present → always 'high'
+    - 2+ threat words or 6+ total matches   → 'high'
+    - 1  threat word  or 4+ total matches   → 'medium'
+    - 2+ obscene terms                       → 'medium'
+    - Any other match                        → 'low'
 
     Returns:
-        Dict with:
-            harmful (bool): whether any harmful content was found
-            severity (str): "none" | "low" | "medium" | "high"
-            scores (dict): per-category normalised scores (0.0–1.0)
+        Dict with keys:
+            harmful  (bool) — whether any harmful content was found
+            severity (str)  — "none" | "low" | "medium" | "high"
+            scores   (dict) — per-category normalised scores (0.0–1.0)
     """
-    counts: Dict[str, int] = {}
-    for category, pattern in HARMFUL_PATTERNS.items():
-        counts[category] = len(pattern.findall(text))
-
-    total_matches = sum(counts.values())
-
-    if total_matches == 0:
-        return {"harmful": False, "severity": "none", "scores": {}}
-
-    # --- Multi-factor severity determination ---
-    severity = "low"  # default when something was found
-
-    # Identity hate speech or explicit threat phrases are always high severity
-    if counts.get("identity_hate", 0) > 0 or counts.get("threat_phrases", 0) > 0:
-        severity = "high"
-
-    # Multiple threat words or large total hit count → high
-    elif counts.get("threat", 0) >= 2 or total_matches >= 6:
-        severity = "high"
-
-    # Any single threat word or moderate hit count → medium
-    elif counts.get("threat", 0) >= 1 or total_matches >= 4:
-        severity = "medium"
-
-    # Multiple obscene terms → medium
-    elif counts.get("obscene", 0) >= 2:
-        severity = "medium"
-
-    # Normalised scores (0.0–1.0) per category — only include non-zero categories
-    scores: Dict[str, float] = {}
-    score_weights = {
-        "toxic":         0.15,
-        "threat":        0.20,
-        "threat_phrases": 0.25,
-        "insult":        0.15,
-        "identity_hate": 0.30,
-        "obscene":       0.15,
-    }
-    for category, count in counts.items():
-        if count > 0:
-            weight = score_weights.get(category, 0.15)
-            scores[category] = min(1.0, 0.3 + count * weight)
-
-    return {
-        "harmful": True,
-        "severity": severity,
-        "scores": scores,
-    }
+    text = validate_input(text, REGEX_MODE_CONFIG)
+    return _detect_harmful_raw(text)
 
 
 # ============================================================
-# Main Detection Function
+# Orchestrating function
+# Validates once at entry, then calls raw helpers to avoid
+# paying the validation cost for every individual detector.
 # ============================================================
 
 def detect_all_regex(
@@ -310,18 +155,27 @@ def detect_all_regex(
     redaction_strategy: RedactionStrategy = RedactionStrategy.TOKEN,
 ) -> DetectionResult:
     """
-    Run all regex-based detections.
+    Run all regex-based detections in a single pass.
+
+    Validates input once at entry; individual raw helpers called internally
+    receive the already-validated string and skip re-validation.
 
     Args:
-        text: Input text to scan
-        detect_pii: Whether to detect PII
-        detect_secrets: Whether to detect secrets
-        detect_harmful: Whether to detect harmful content
-        redaction_strategy: How to redact detected content
+        text:               Input text to scan.
+        detect_pii:         Whether to detect PII.
+        detect_secrets:     Whether to detect secrets/API keys.
+        detect_harmful:     Whether to detect harmful content.
+        redaction_strategy: How to replace detected content.
 
     Returns:
-        DetectionResult with all findings
+        DetectionResult containing all findings.
+
+    Raises:
+        InputValidationError: If text is None or looks like binary data.
+        InputTooLongError:    If text exceeds REGEX_MODE_CONFIG.max_length.
     """
+    text = validate_input(text, REGEX_MODE_CONFIG)
+
     if not text:
         return DetectionResult(
             original_text="",
@@ -332,49 +186,43 @@ def detect_all_regex(
 
     all_detections: List[Detection] = []
 
-    # PII detection
     if detect_pii:
-        all_detections.extend(detect_emails(text))
-        all_detections.extend(detect_phones(text))
-        all_detections.extend(detect_ssns(text))
-        all_detections.extend(detect_credit_cards(text))
-        all_detections.extend(detect_bank_accounts(text))
-        all_detections.extend(detect_dob(text))
-        all_detections.extend(detect_drivers_licenses(text))
-        all_detections.extend(detect_mrn(text))
-        all_detections.extend(detect_addresses(text))
-        all_detections.extend(detect_person_names_regex(text))
+        all_detections.extend(_detect_emails_raw(text))
+        all_detections.extend(_detect_phones_raw(text))
+        all_detections.extend(_detect_ssns_raw(text))
+        all_detections.extend(_detect_credit_cards_raw(text))
+        all_detections.extend(_detect_bank_accounts_raw(text))
+        all_detections.extend(_detect_dob_raw(text))
+        all_detections.extend(_detect_drivers_licenses_raw(text))
+        all_detections.extend(_detect_mrn_raw(text))
+        all_detections.extend(_detect_addresses_raw(text))
+        all_detections.extend(_detect_person_names_raw(text))
 
-    # Secrets detection
     if detect_secrets:
-        all_detections.extend(detect_secrets_regex(text))
+        all_detections.extend(_detect_secrets_raw(text))
 
-    # Harmful content detection
     is_harmful = False
     harmful_scores: Dict[str, float] = {}
     severity = "none"
 
     if detect_harmful:
-        harmful_result = detect_harmful_regex(text)
+        harmful_result = _detect_harmful_raw(text)
         is_harmful = harmful_result["harmful"]
         harmful_scores = harmful_result["scores"]
         severity = harmful_result["severity"]
 
-    # Remove duplicates (same span)
-    seen = set()
-    unique_detections = []
+    # Deduplicate by (start, end, type)
+    seen: set = set()
+    unique_detections: List[Detection] = []
     for det in all_detections:
         key = (det.start, det.end, det.type)
         if key not in seen:
             seen.add(key)
             unique_detections.append(det)
 
-    # Redact
-    redacted = redact_spans(text, unique_detections, redaction_strategy)
-
     return DetectionResult(
         original_text=text,
-        redacted_text=redacted,
+        redacted_text=redact_spans(text, unique_detections, redaction_strategy),
         detections=unique_detections,
         mode="regex",
         harmful=is_harmful,
@@ -383,4 +231,165 @@ def detect_all_regex(
     )
 
 
+# ============================================================
+# Private raw helpers
+# Accept pre-validated text — called only by detect_all_regex()
+# or by the public wrappers above after validation.
+# Not exported in __all__.
+# ============================================================
 
+def _detect_emails_raw(text: str) -> List[Detection]:
+    return [
+        Detection(type=DetectionType.EMAIL.value, text=m.group(),
+                  start=m.start(), end=m.end(), confidence=0.99,
+                  metadata={"method": "regex"})
+        for m in EMAIL_RE.finditer(text)
+    ]
+
+
+def _detect_phones_raw(text: str) -> List[Detection]:
+    detections = []
+    for m in PHONE_RE.finditer(text):
+        phone = m.group()
+        if len(''.join(c for c in phone if c.isdigit())) >= 7:
+            detections.append(Detection(
+                type=DetectionType.PHONE.value, text=phone,
+                start=m.start(), end=m.end(), confidence=0.95,
+                metadata={"method": "regex"},
+            ))
+    return detections
+
+
+def _detect_ssns_raw(text: str) -> List[Detection]:
+    detections = []
+    for m in SSN_RE.finditer(text):
+        ssn = m.group()
+        digits = ''.join(c for c in ssn if c.isdigit())
+        if digits[:3] not in ('000', '666') and not digits.startswith('9'):
+            detections.append(Detection(
+                type=DetectionType.SSN.value, text=ssn,
+                start=m.start(), end=m.end(), confidence=0.98,
+                metadata={"method": "regex"},
+            ))
+    return detections
+
+
+def _detect_credit_cards_raw(text: str) -> List[Detection]:
+    detections = []
+    for m in CREDIT_CARD_RE.finditer(text):
+        card = m.group()
+        digits = ''.join(c for c in card if c.isdigit())
+        if luhn_check(digits):
+            detections.append(Detection(
+                type=DetectionType.CREDIT_CARD.value, text=card,
+                start=m.start(), end=m.end(), confidence=0.99,
+                metadata={"method": "regex", "luhn_valid": True},
+            ))
+    return detections
+
+
+def _detect_bank_accounts_raw(text: str) -> List[Detection]:
+    return [
+        Detection(type=DetectionType.BANK_ACCOUNT.value, text=m.group(),
+                  start=m.start(), end=m.end(), confidence=0.90,
+                  metadata={"method": "regex"})
+        for m in BANK_ACCOUNT_RE.finditer(text)
+    ]
+
+
+def _detect_dob_raw(text: str) -> List[Detection]:
+    return [
+        Detection(type=DetectionType.DOB.value, text=m.group(),
+                  start=m.start(), end=m.end(), confidence=0.85,
+                  metadata={"method": "regex"})
+        for m in DOB_RE.finditer(text)
+    ]
+
+
+def _detect_drivers_licenses_raw(text: str) -> List[Detection]:
+    return [
+        Detection(type=DetectionType.DRIVERS_LICENSE.value, text=m.group(),
+                  start=m.start(), end=m.end(), confidence=0.75,
+                  metadata={"method": "regex"})
+        for m in DRIVERS_LICENSE_RE.finditer(text)
+    ]
+
+
+def _detect_mrn_raw(text: str) -> List[Detection]:
+    return [
+        Detection(type=DetectionType.MEDICAL_RECORD_NUMBER.value, text=m.group(),
+                  start=m.start(), end=m.end(), confidence=0.90,
+                  metadata={"method": "regex"})
+        for m in MRN_RE.finditer(text)
+    ]
+
+
+def _detect_addresses_raw(text: str) -> List[Detection]:
+    return [
+        Detection(type=DetectionType.ADDRESS.value, text=m.group(),
+                  start=m.start(), end=m.end(), confidence=0.85,
+                  metadata={"method": "regex"})
+        for m in ADDRESS_RE.finditer(text)
+    ]
+
+
+def _detect_person_names_raw(text: str) -> List[Detection]:
+    return [
+        Detection(type=DetectionType.PERSON.value, text=m.group(),
+                  start=m.start(), end=m.end(), confidence=0.35,
+                  metadata={"method": "regex"})
+        for m in PERSON_NAME_RE.finditer(text)
+    ]
+
+
+def _detect_secrets_raw(text: str) -> List[Detection]:
+    detections = []
+    for secret in find_secrets(text):
+        det_type = (
+            DetectionType.API_KEY.value
+            if "api" in secret["type"] or "key" in secret["type"]
+            else DetectionType.SECRET.value
+        )
+        detections.append(Detection(
+            type=det_type, text=secret["span"],
+            start=secret["start"], end=secret["end"], confidence=0.95,
+            metadata={
+                "method": "regex",
+                "secret_type": secret["type"],
+                "detection_method": secret["method"],
+            },
+        ))
+    return detections
+
+
+def _detect_harmful_raw(text: str) -> Dict[str, Any]:
+    counts: Dict[str, int] = {
+        cat: len(pattern.findall(text))
+        for cat, pattern in HARMFUL_PATTERNS.items()
+    }
+    total_matches = sum(counts.values())
+
+    if total_matches == 0:
+        return {"harmful": False, "severity": "none", "scores": {}}
+
+    if counts.get("identity_hate", 0) > 0 or counts.get("threat_phrases", 0) > 0:
+        severity = "high"
+    elif counts.get("threat", 0) >= 2 or total_matches >= 6:
+        severity = "high"
+    elif counts.get("threat", 0) >= 1 or total_matches >= 4:
+        severity = "medium"
+    elif counts.get("obscene", 0) >= 2:
+        severity = "medium"
+    else:
+        severity = "low"
+
+    score_weights = {
+        "toxic": 0.15, "threat": 0.20, "threat_phrases": 0.25,
+        "insult": 0.15, "identity_hate": 0.30, "obscene": 0.15,
+    }
+    scores = {
+        cat: min(1.0, 0.3 + count * score_weights.get(cat, 0.15))
+        for cat, count in counts.items()
+        if count > 0
+    }
+    return {"harmful": True, "severity": severity, "scores": scores}
