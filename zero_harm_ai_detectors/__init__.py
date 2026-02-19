@@ -7,25 +7,25 @@ Two detection modes:
 
 Usage:
     from zero_harm_ai_detectors import detect
-    
+
     # Regex mode (default) - fast, great for structured data
     result = detect("Email: john@example.com")
-    
+
     # AI mode - better for names, locations, organizations
     result = detect("Contact John Smith at Microsoft", mode="ai")
-    
+
     # Both return identical DetectionResult format!
 
 File: zero_harm_ai_detectors/__init__.py
 """
-from typing import Any, Dict, List, Optional
+from typing import Optional
 
 # ============================================================
 # Core Exports (always available)
 # ============================================================
 
 from .core_patterns import (
-    # Result types (unified across modes)
+    # Result types
     Detection,
     DetectionResult,
     DetectionType,
@@ -75,11 +75,6 @@ from .regex_detectors import (
     detect_person_names_regex,
     detect_secrets_regex,
     detect_harmful_regex,
-    # Legacy API
-    detect_pii as detect_pii_legacy,
-    detect_secrets as detect_secrets_legacy,
-    detect_harmful as detect_harmful_legacy,
-    redact_text,
 )
 
 # ============================================================
@@ -109,7 +104,7 @@ except ImportError:
 
 
 # ============================================================
-# Unified API (main entry point)
+# Unified API
 # ============================================================
 
 def detect(
@@ -123,7 +118,7 @@ def detect(
 ) -> DetectionResult:
     """
     Unified detection function - main entry point for the library.
-    
+
     Args:
         text: Input text to scan
         mode: "regex" (fast, pattern-based) or "ai" (slower, transformer-based)
@@ -132,61 +127,37 @@ def detect(
         detect_harmful: Whether to detect harmful content
         redaction_strategy: "token", "mask_all", "mask_last4", or "hash"
         ai_config: Optional AIConfig for AI mode customization
-    
+
     Returns:
-        DetectionResult with identical structure for both modes:
-        - original_text: Original input
-        - redacted_text: Text with sensitive content redacted
-        - detections: List of Detection objects
-        - mode: "regex" or "ai"
-        - harmful: Boolean if harmful content detected
-        - harmful_scores: Dict of harm category scores
-        - severity: "none", "low", "medium", or "high"
-    
-    Mode comparison:
-        | Feature          | regex        | ai           |
-        |------------------|--------------|--------------|
-        | Speed            | 1-5ms        | 50-200ms     |
-        | Email/Phone/SSN  | 95%+ ✓       | 95%+ ✓       |
-        | Person Names     | ~30%         | ~90% ✓       |
-        | Locations        | ❌           | ~85% ✓       |
-        | Organizations    | ❌           | ~80% ✓       |
-        | Dependencies     | regex only   | transformers |
-    
-    Example:
-        # Regex mode (default) - fast, pattern-based
-        result = detect("Email: john@example.com")
-        print(result.detections)  # [Detection(EMAIL, ...)]
-        
-        # AI mode - enhanced for names/locations/orgs
-        result = detect("Contact John Smith at Microsoft", mode="ai")
-        print(result.detections)  # [Detection(PERSON, ...), Detection(ORGANIZATION, ...)]
-    
+        DetectionResult with:
+            original_text (str)   - Original input
+            redacted_text (str)   - Text with sensitive content replaced
+            detections (list)     - List of Detection objects
+            mode (str)            - "regex" or "ai"
+            harmful (bool)        - Whether harmful content was found
+            harmful_scores (dict) - Per-category harm scores
+            severity (str)        - "none" | "low" | "medium" | "high"
+
     Raises:
         ValueError: If mode is not "regex" or "ai"
-        ImportError: If mode="ai" but AI dependencies not installed
+        ImportError: If mode="ai" but AI dependencies are not installed
     """
     if mode not in ("regex", "ai"):
-        raise ValueError(f"Invalid mode: {mode}. Must be 'regex' or 'ai'.")
-    
+        raise ValueError(f"Invalid mode: {mode!r}. Must be 'regex' or 'ai'.")
+
     try:
         strategy = RedactionStrategy(redaction_strategy)
     except ValueError:
         strategy = RedactionStrategy.TOKEN
-    
+
     if mode == "ai":
         if not AI_AVAILABLE:
             raise ImportError(
                 "AI mode requires additional dependencies.\n"
                 "Install with: pip install 'zero_harm_ai_detectors[ai]'\n"
-                "Or use regex mode: detect(text, mode='regex')"
+                "Or use the default regex mode: detect(text, mode='regex')"
             )
-        
-        if ai_config:
-            pipeline = AIPipeline(ai_config)
-        else:
-            pipeline = get_pipeline()
-        
+        pipeline = AIPipeline(ai_config) if ai_config else get_pipeline()
         return pipeline.detect(
             text,
             detect_pii=detect_pii,
@@ -194,59 +165,14 @@ def detect(
             detect_harmful=detect_harmful,
             redaction_strategy=strategy,
         )
-    
-    else:  # regex mode
-        return detect_all_regex(
-            text,
-            detect_pii=detect_pii,
-            detect_secrets=detect_secrets,
-            detect_harmful=detect_harmful,
-            redaction_strategy=strategy,
-        )
 
-
-def detect_pii(text: str, mode: str = "regex") -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Detect PII only (legacy-compatible API).
-    
-    Args:
-        text: Input text to scan
-        mode: "regex" or "ai"
-    
-    Returns:
-        Grouped dictionary format for backward compatibility.
-    """
-    result = detect(text, mode=mode, detect_secrets=False, detect_harmful=False)
-    return result.to_legacy_dict()
-
-
-def detect_secrets(text: str) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Detect secrets only (always uses regex - 95%+ accuracy).
-    
-    Returns grouped dictionary format.
-    """
-    return detect_secrets_legacy(text)
-
-
-def detect_harmful(text: str, mode: str = "regex") -> Dict[str, Any]:
-    """
-    Detect harmful content.
-    
-    Args:
-        text: Input text
-        mode: "regex" (keyword patterns) or "ai" (transformer model)
-    
-    Returns:
-        Dict with harmful content analysis
-    """
-    result = detect(text, mode=mode, detect_pii=False, detect_secrets=False)
-    
-    return {
-        "harmful": result.harmful,
-        "severity": result.severity,
-        "scores": result.harmful_scores,
-    }
+    return detect_all_regex(
+        text,
+        detect_pii=detect_pii,
+        detect_secrets=detect_secrets,
+        detect_harmful=detect_harmful,
+        redaction_strategy=strategy,
+    )
 
 
 # ============================================================
@@ -256,39 +182,35 @@ def detect_harmful(text: str, mode: str = "regex") -> Dict[str, Any]:
 try:
     from ._version import version as __version__
 except ImportError:
-    __version__ = "0.3.0"
+    __version__ = "1.0.0"
 
 
 # ============================================================
-# Exports
+# Public API
 # ============================================================
 
 __all__ = [
-    # Main API
+    # Main entry point
     "detect",
-    "detect_pii",
-    "detect_secrets", 
-    "detect_harmful",
-    
+
     # Result types
     "Detection",
     "DetectionResult",
     "DetectionType",
-    
+
     # Redaction
     "RedactionStrategy",
     "apply_redaction",
     "redact_spans",
-    "redact_text",
-    
-    # Validation
+
+    # Input validation
     "validate_input",
     "validate_input_soft",
     "InputConfig",
     "InputValidationError",
     "InputTooLongError",
-    
-    # Regex mode
+
+    # Regex mode - individual detectors
     "detect_all_regex",
     "detect_emails",
     "detect_phones",
@@ -302,20 +224,20 @@ __all__ = [
     "detect_person_names_regex",
     "detect_secrets_regex",
     "detect_harmful_regex",
-    
-    # AI mode (None if not available)
+
+    # AI mode (None if dependencies not installed)
     "AI_AVAILABLE",
     "check_ai_available",
     "AIConfig",
     "AIPipeline",
     "detect_all_ai",
     "get_pipeline",
-    
+
     # Utilities
     "luhn_check",
     "shannon_entropy",
     "find_secrets",
-    
+
     # Version
     "__version__",
 ]

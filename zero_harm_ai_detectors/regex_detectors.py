@@ -28,6 +28,8 @@ from .core_patterns import (
     ADDRESS_RE,
     PERSON_NAME_RE,
     HARMFUL_PATTERNS,
+    _SEVERITY_ORDER,
+    _max_severity,
     # Functions
     luhn_check,
     find_secrets,
@@ -78,9 +80,7 @@ def detect_ssns(text: str) -> List[Detection]:
     detections = []
     for match in SSN_RE.finditer(text):
         ssn = match.group()
-        # Additional validation
         digits = ''.join(c for c in ssn if c.isdigit())
-        # SSN cannot start with 9, 666, or 000
         if digits[:3] not in ('000', '666') and not digits.startswith('9'):
             detections.append(Detection(
                 type=DetectionType.SSN.value,
@@ -189,7 +189,7 @@ def detect_addresses(text: str) -> List[Detection]:
 def detect_person_names_regex(text: str) -> List[Detection]:
     """
     Detect person names using regex (~30-40% accuracy).
-    
+
     For better accuracy, use AI mode (mode='ai').
     """
     detections = []
@@ -209,10 +209,15 @@ def detect_secrets_regex(text: str) -> List[Detection]:
     """Detect secrets and API keys using three-tier detection."""
     detections = []
     secrets = find_secrets(text)
-    
+
     for secret in secrets:
+        det_type = (
+            DetectionType.API_KEY.value
+            if "api" in secret["type"] or "key" in secret["type"]
+            else DetectionType.SECRET.value
+        )
         detections.append(Detection(
-            type=DetectionType.API_KEY.value if "api" in secret["type"] or "key" in secret["type"] else DetectionType.SECRET.value,
+            type=det_type,
             text=secret["span"],
             start=secret["start"],
             end=secret["end"],
@@ -223,43 +228,72 @@ def detect_secrets_regex(text: str) -> List[Detection]:
                 "detection_method": secret["method"],
             },
         ))
-    
+
     return detections
 
 
 def detect_harmful_regex(text: str) -> Dict[str, Any]:
     """
     Detect harmful content using regex patterns.
-    
+
+    Uses multi-factor severity logic:
+    - identity_hate or threat_phrases → always 'high'
+    - Multiple threat words OR high total match count → 'high'
+    - Any threat word or mid-range total → 'medium'
+    - Low-count insults/toxic/obscene → 'low'
+
     Returns:
-        Dict with harmful flag, severity, and category scores.
+        Dict with:
+            harmful (bool): whether any harmful content was found
+            severity (str): "none" | "low" | "medium" | "high"
+            scores (dict): per-category normalised scores (0.0–1.0)
     """
-    scores = {}
-    max_severity = "none"
-    is_harmful = False
-    
-    severity_map = {
-        'threat': 'high',
-        'hate': 'high',
-        'profanity': 'medium',
-        'insult': 'low',
-    }
-    
-    severity_order = {'none': 0, 'low': 1, 'medium': 2, 'high': 3}
-    
+    counts: Dict[str, int] = {}
     for category, pattern in HARMFUL_PATTERNS.items():
-        matches = pattern.findall(text)
-        if matches:
-            is_harmful = True
-            scores[category] = len(matches) / 10.0  # Normalize
-            
-            cat_severity = severity_map.get(category, 'low')
-            if severity_order[cat_severity] > severity_order[max_severity]:
-                max_severity = cat_severity
-    
+        counts[category] = len(pattern.findall(text))
+
+    total_matches = sum(counts.values())
+
+    if total_matches == 0:
+        return {"harmful": False, "severity": "none", "scores": {}}
+
+    # --- Multi-factor severity determination ---
+    severity = "low"  # default when something was found
+
+    # Identity hate speech or explicit threat phrases are always high severity
+    if counts.get("identity_hate", 0) > 0 or counts.get("threat_phrases", 0) > 0:
+        severity = "high"
+
+    # Multiple threat words or large total hit count → high
+    elif counts.get("threat", 0) >= 2 or total_matches >= 6:
+        severity = "high"
+
+    # Any single threat word or moderate hit count → medium
+    elif counts.get("threat", 0) >= 1 or total_matches >= 4:
+        severity = "medium"
+
+    # Multiple obscene terms → medium
+    elif counts.get("obscene", 0) >= 2:
+        severity = "medium"
+
+    # Normalised scores (0.0–1.0) per category — only include non-zero categories
+    scores: Dict[str, float] = {}
+    score_weights = {
+        "toxic":         0.15,
+        "threat":        0.20,
+        "threat_phrases": 0.25,
+        "insult":        0.15,
+        "identity_hate": 0.30,
+        "obscene":       0.15,
+    }
+    for category, count in counts.items():
+        if count > 0:
+            weight = score_weights.get(category, 0.15)
+            scores[category] = min(1.0, 0.3 + count * weight)
+
     return {
-        "harmful": is_harmful,
-        "severity": max_severity,
+        "harmful": True,
+        "severity": severity,
         "scores": scores,
     }
 
@@ -277,14 +311,14 @@ def detect_all_regex(
 ) -> DetectionResult:
     """
     Run all regex-based detections.
-    
+
     Args:
         text: Input text to scan
         detect_pii: Whether to detect PII
         detect_secrets: Whether to detect secrets
         detect_harmful: Whether to detect harmful content
         redaction_strategy: How to redact detected content
-    
+
     Returns:
         DetectionResult with all findings
     """
@@ -295,9 +329,9 @@ def detect_all_regex(
             detections=[],
             mode="regex",
         )
-    
+
     all_detections: List[Detection] = []
-    
+
     # PII detection
     if detect_pii:
         all_detections.extend(detect_emails(text))
@@ -310,22 +344,22 @@ def detect_all_regex(
         all_detections.extend(detect_mrn(text))
         all_detections.extend(detect_addresses(text))
         all_detections.extend(detect_person_names_regex(text))
-    
+
     # Secrets detection
     if detect_secrets:
         all_detections.extend(detect_secrets_regex(text))
-    
+
     # Harmful content detection
     is_harmful = False
     harmful_scores: Dict[str, float] = {}
     severity = "none"
-    
+
     if detect_harmful:
         harmful_result = detect_harmful_regex(text)
         is_harmful = harmful_result["harmful"]
         harmful_scores = harmful_result["scores"]
         severity = harmful_result["severity"]
-    
+
     # Remove duplicates (same span)
     seen = set()
     unique_detections = []
@@ -334,10 +368,10 @@ def detect_all_regex(
         if key not in seen:
             seen.add(key)
             unique_detections.append(det)
-    
+
     # Redact
     redacted = redact_spans(text, unique_detections, redaction_strategy)
-    
+
     return DetectionResult(
         original_text=text,
         redacted_text=redacted,
@@ -349,58 +383,4 @@ def detect_all_regex(
     )
 
 
-# ============================================================
-# Legacy API (v0.1.x compatibility)
-# ============================================================
 
-def detect_pii(text: str) -> Dict[str, List[Dict[str, Any]]]:
-    """Legacy PII detection - returns grouped dictionary."""
-    result = detect_all_regex(text, detect_secrets=False, detect_harmful=False)
-    return result.to_legacy_dict()
-
-
-def detect_secrets(text: str) -> Dict[str, List[Dict[str, Any]]]:
-    """Legacy secrets detection - returns grouped dictionary."""
-    detections = detect_secrets_regex(text)
-    grouped: Dict[str, List[Dict[str, Any]]] = {}
-    for det in detections:
-        if det.type not in grouped:
-            grouped[det.type] = []
-        grouped[det.type].append({
-            "span": det.text,
-            "start": det.start,
-            "end": det.end,
-            "confidence": det.confidence,
-        })
-    return grouped
-
-
-def detect_harmful(text: str) -> Dict[str, Any]:
-    """Legacy harmful content detection."""
-    return detect_harmful_regex(text)
-
-
-def redact_text(
-    text: str,
-    detections: Dict[str, List[Dict[str, Any]]],
-    strategy: str = "token",
-) -> str:
-    """Legacy redaction function."""
-    try:
-        strat = RedactionStrategy(strategy)
-    except ValueError:
-        strat = RedactionStrategy.TOKEN
-    
-    # Convert legacy format to Detection objects
-    detection_list = []
-    for det_type, items in detections.items():
-        for item in items:
-            detection_list.append(Detection(
-                type=det_type,
-                text=item.get("span", ""),
-                start=item.get("start", 0),
-                end=item.get("end", 0),
-                confidence=item.get("confidence", 1.0),
-            ))
-    
-    return redact_spans(text, detection_list, strat)

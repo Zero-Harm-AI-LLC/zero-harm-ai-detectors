@@ -1,208 +1,73 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [1.0.0] - 2025-01-XX
 
-## [Unreleased]
+### Initial Release
 
-## [0.2.0] - 2025-01-XX
+**Zero Harm AI Detectors** is a privacy and content safety detection library
+offering two modes through a single unified API.
 
-### Added
-- **AI-Powered Detection**: Transformer-based models (BERT/RoBERTa) for PII detection
-- **ZeroHarmPipeline**: Unified detection class combining PII, secrets, and harmful content detection
-- **Confidence Scores**: All detections now include confidence scores (0.0-1.0) for transparency
-- **New Detection Types**: 
-  - Location detection (cities, states, countries) using AI
-  - Organization detection (companies, institutions) using AI
-  - Enhanced person name detection with contextual understanding
-- **New API Functions**:
-  - `detect_all_threats()`: One-line function to detect everything
-  - `get_pipeline()`: Get global pipeline instance
-- **Smart API Routing**: Automatically uses AI when available, falls back to regex
-- **Comprehensive Documentation**:
-  - `MIGRATION_GUIDE.md`: Step-by-step upgrade instructions
-  - Updated `README.md` with AI features and examples
-  - Complete API documentation with examples
-- **Test Suite**: Comprehensive tests for AI detection (`test_ai_detectors.py`)
-- **Multiple Redaction Strategies**: TOKEN, MASK_ALL, MASK_LAST4, HASH
+#### Detection Modes
 
-### Changed
-- **Person Name Detection**: Improved from 30-40% accuracy to 85-95% accuracy using AI models
-- **Contextual Understanding**: AI models understand context (e.g., "Apple" company vs "apple" fruit)
-- **Better International Support**: Improved handling of non-English names and locations
-- **Performance**: AI detection takes 50-200ms (vs 1-5ms regex), but with much higher accuracy
-- **Import Paths**: All imports work unchanged, but now use AI automatically when transformers installed
+- **`mode='regex'`** — Fast pattern-based detection (1–5ms). No ML dependencies.
+  Best for structured data at high throughput.
+- **`mode='ai'`** — Transformer-based detection (50–200ms). Requires
+  `pip install zero_harm_ai_detectors[ai]`. Best for unstructured text with
+  names, locations, and organisations.
 
-### Maintained
-- **100% Backward Compatibility**: All v0.1.x code works unchanged
-- **Legacy API Support**: Old `detect_pii()`, `detect_secrets()` functions work identically
-- **Regex Fallback**: Can force regex-only detection with `use_ai=False` parameter
-- **All existing detection types**: Email, phone, SSN, credit cards, etc. still work
+#### PII Detection
 
-### Performance
-- **Model Loading**: One-time 5-10 seconds at application startup
-- **Detection Speed**: 
-  - AI-based: 50-200ms per text
-  - Regex-based: 1-5ms per text (still available)
-- **Memory Usage**: ~2GB for AI models
-- **GPU Support**: Optional CUDA acceleration for faster processing
+| Type | Regex | AI |
+|------|-------|----|
+| Email | ✅ 99% | ✅ 99% |
+| Phone | ✅ 95% | ✅ 95% |
+| SSN | ✅ 98% | ✅ 98% |
+| Credit Card (Luhn) | ✅ 99% | ✅ 99% |
+| Bank Account | ✅ 90% | ✅ 90% |
+| Date of Birth | ✅ 85% | ✅ 85% |
+| Address | ✅ 85% | ✅ 85% |
+| Person Name | ⚠️ 30–40% | ✅ 85–95% |
+| Location | ❌ | ✅ 80–90% |
+| Organisation | ❌ | ✅ 75–85% |
 
-### Dependencies
-- **New Optional Dependencies** (for AI features):
-  - `transformers>=4.30.0`
-  - `torch>=2.0.0`
-  - `sentencepiece>=0.1.99`
-- **Core Dependencies** (unchanged):
-  - `regex>=2022.1.18`
-  - `numpy>=1.21.0`
+#### Secrets Detection (Three-Tier)
 
-### Migration
-- No code changes required for basic upgrade
-- Install with AI: `pip install zero_harm_ai_detectors[ai]`
-- See `MIGRATION_GUIDE.md` for detailed upgrade instructions
+- **Tier 1** — Structured prefixes: OpenAI, AWS, GitHub, Stripe, Slack, Google,
+  Twilio, SendGrid, npm, PyPI, Anthropic
+- **Tier 2** — AWS Secret Access Key (context + entropy)
+- **Tier 3** — Generic secrets (context keyword + entropy threshold)
 
-### Technical Details
-- **AI Models Used**:
-  - PII Detection: `dslim/bert-base-NER` (default) or `Jean-Baptiste/roberta-large-ner-english`
-  - Harmful Content: `unitary/multilingual-toxic-xlm-roberta`
-- **Architecture**: Combines AI-based NER with regex patterns for optimal accuracy
-- **Confidence Thresholds**: Configurable per detection type
+#### Harmful Content Detection
 
-## [0.1.2] - 2025-01-XX
+Six pattern categories with multi-factor severity:
 
-### Changed
-- **BREAKING**: Renamed package from `zero-harm-ai-detectors` to `zero_harm_ai_detectors` for consistent import paths
-- Import path changed from `from detectors import ...` to `from zero_harm_ai_detectors import ...`
-- Fixed package naming confusion between PyPI name and Python import name
+| Category | Severity trigger |
+|----------|-----------------|
+| `identity_hate` | Always **high** |
+| `threat_phrases` | Always **high** |
+| `threat` (word) | **medium** / **high** depending on count |
+| `toxic` | Contributes to escalation |
+| `insult` | Contributes to escalation |
+| `obscene` | Contributes to escalation |
 
-### Fixed
-- Resolved import issues in backend integration
-- Updated all documentation examples with correct import syntax
+#### Redaction Strategies
 
-## [0.1.1] - 2025-01-XX
+`token` · `mask_all` · `mask_last4` · `hash`
 
-### Changed
-- Minor changes for backend integration compatibility
+#### Architecture
 
-### Fixed
-- Resolved import issues in backend integration
-- Improved error handling in detection pipeline
+- `core_patterns.py` — single source of truth for all patterns, validators,
+  result types, and redaction utilities
+- `regex_detectors.py` — regex detection mode
+- `ai_detectors.py` — AI detection mode (optional dependency)
+- `input_validation.py` — DoS/ReDoS protection
 
-## [0.1.0] - 2024-XX-XX
+#### Dependencies
 
-### Added
-- **Initial Release** of zero-harm-ai-detectors
-- **PII Detection** for:
-  - Email addresses
-  - Phone numbers (US format)
-  - Social Security Numbers (SSN)
-  - Credit card numbers (with Luhn validation)
-  - Bank account numbers
-  - Dates of birth (DOB)
-  - Driver's licenses (US state formats)
-  - Medical record numbers (MRN)
-  - Person names (regex-based, 30-40% accuracy)
-  - Addresses (street addresses and P.O. boxes)
-- **Secrets Detection** for:
-  - API keys (OpenAI, AWS, Google, etc.)
-  - Access tokens (GitHub, Slack, Stripe, JWT)
-  - Generic secret patterns
-- **Harmful Content Detection**:
-  - Toxic language detection using transformer models
-  - Threat detection with keyword boosting
-  - Insult and obscene content detection
-  - Identity hate speech detection
-  - Severity levels (low, medium, high)
-- **Redaction Strategies**:
-  - Mask all characters
-  - Mask last 4 characters
-  - SHA-256 hashing
-- **Comprehensive Test Suite**: Unit tests for all detectors
-- **MIT License**: Open source under MIT license
-
-### Detection Accuracy (v0.1.0)
-- Email: 99%+
-- Phone: 95%+
-- SSN: 95%+
-- Credit Cards: 90%+ (with Luhn validation)
-- Person Names: 30-40% (regex-based)
-- Secrets: 95%+
-
-### Technical Details (v0.1.0)
-- Python 3.8+ support
-- Regex-based PII detection
-- Transformer-based harmful content detection
-- No external API calls (all processing local)
-
----
-
-## Version Comparison
-
-| Feature | v0.1.0 | v0.2.x |
-|---------|--------|--------|
-| Person Name Detection | 30-40% | 85-95% ⭐ |
-| Location Detection | ❌ | ✅ ⭐ |
-| Organization Detection | ❌ | ✅ ⭐ |
-| Confidence Scores | ❌ | ✅ ⭐ |
-| Unified Pipeline | ❌ | ✅ ⭐ |
-| Detection Speed | 1-5ms | 50-200ms |
-| Backward Compatible | N/A | ✅ |
-
----
-
-## Upgrade Guide
-
-### From v0.1.x to v0.2.x
-
-**No code changes required!** Your existing code works automatically:
-
-```bash
-# Upgrade
-pip install --upgrade zero_harm_ai_detectors[ai]
-
-# Your code still works
-from zero_harm_ai_detectors import detect_pii
-pii = detect_pii("Contact John Smith")  # Now 90% accurate!
-```
-
-**For new code, use the unified pipeline:**
-
-```python
-from zero_harm_ai_detectors import ZeroHarmPipeline
-
-pipeline = ZeroHarmPipeline()
-result = pipeline.detect("Contact John Smith at john@example.com")
-print(result.redacted_text)
-```
-
-See [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md) for detailed instructions.
-
----
-
-## Links
-
-- **GitHub Repository**: https://github.com/Zero-Harm-AI-LLC/zero-harm-ai-detectors
-- **PyPI Package**: https://pypi.org/project/zero-harm-ai-detectors/
-- **Documentation**: See [README.md](README.md)
-- **Migration Guide**: See [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md)
-- **Issues**: https://github.com/Zero-Harm-AI-LLC/zero-harm-ai-detectors/issues
-
----
-
-## Notes
-
-### Breaking Changes
-- **v0.2.x**: No breaking changes (100% backward compatible)
-
-### Deprecation Warnings
-- **v0.2.x**: Legacy `HarmfulTextDetector` class is deprecated in favor of `ZeroHarmPipeline`
-  - Will be removed in v1.0.0
-  - Update your code to use `ZeroHarmPipeline` for future compatibility
-
-### Future Plans
-- v0.3.0: Fine-tuned models for specific industries (healthcare, finance)
-- v0.3.0: Streaming API for real-time detection
-- v0.4.0: Multi-language support improvements
-- v1.0.0: Stable API, remove deprecated classes
+| Install | Dependencies |
+|---------|-------------|
+| `pip install zero_harm_ai_detectors` | `regex` only |
+| `pip install zero_harm_ai_detectors[ai]` | + `transformers`, `torch`, `sentencepiece` |

@@ -211,23 +211,60 @@ GENERIC_SECRET_RE = re.compile(
 # ============================================================
 
 HARMFUL_PATTERNS = {
-    'insult': re.compile(
-        r'\b(?:stupid|idiot|moron|dumb|loser|pathetic|worthless)\b',
+    # Toxic/offensive language (broad catch-all)
+    'toxic': re.compile(
+        r'\b(?:fuck|shit|damn|hell|ass|bitch|bastard|crap|piss|whore|slut|'
+        r'dickhead|asshole|dumbass|jackass|moron|idiot|stupid|'
+        r'hate|hated|hates|hating|despise|despises|loathe|loathes)\b',
         re.IGNORECASE
     ),
+    # Single-word threat verbs (higher severity when combined with target)
     'threat': re.compile(
-        r'\b(?:kill|murder|hurt|destroy|attack|beat)\s+(?:you|him|her|them)\b',
+        r'\b(?:kill|murder|hurt|harm|stab|shoot|attack|destroy|beat|punch|'
+        r'kick|slap|hit|strike|assault|rape|torture|mutilate|strangle|'
+        r'choke|bomb|explode|burn|lynch|hang|drown|suffocate|poison)\b',
         re.IGNORECASE
     ),
-    'hate': re.compile(
-        r'\b(?:hate|despise|disgusting|revolting)\s+(?:you|them|all)\b',
+    # Explicit threat phrases — highest signal, always high severity
+    'threat_phrases': re.compile(
+        r'\b(?:going\s+to\s+(?:kill|hurt|harm|attack|destroy)|'
+        r'i\s+will\s+(?:kill|hurt|harm|attack|destroy)|'
+        r"i'll\s+(?:kill|hurt|harm|attack|destroy)|"
+        r'gonna\s+(?:kill|hurt|harm|attack|destroy)|'
+        r'want\s+(?:you|to)\s+dead|'
+        r'should\s+(?:kill|die|be\s+killed)|'
+        r'deserve\s+to\s+(?:die|be\s+killed|suffer)|'
+        r'hope\s+you\s+(?:die|get\s+killed|suffer))\b',
         re.IGNORECASE
     ),
-    'profanity': re.compile(
-        r'\b(?:fuck|shit|damn|ass|bitch|bastard)\b',
+    # Personal insults
+    'insult': re.compile(
+        r'\b(?:stupid|idiot|moron|dumb|retard|loser|pathetic|worthless|'
+        r'useless|garbage|trash|scum|vermin|disgusting|repulsive|'
+        r'ugly|fat|pig|slob|freak|creep|weirdo|psycho|crazy|insane)\b',
+        re.IGNORECASE
+    ),
+    # Identity-based hate speech — always high severity
+    'identity_hate': re.compile(
+        r'\b(?:fag|faggot|dyke|tranny|nigger|nigga|chink|gook|spic|wetback|'
+        r'kike|beaner|raghead|towelhead|nazi|supremacist)\b',
+        re.IGNORECASE
+    ),
+    # Obscene/sexual content
+    'obscene': re.compile(
+        r'\b(?:cock|dick|pussy|vagina|cunt|tits|boobs|porn|'
+        r'masturbate|orgasm|screw|bang|hump)\b',
         re.IGNORECASE
     ),
 }
+
+# Severity ordering (for comparison)
+_SEVERITY_ORDER = {'none': 0, 'low': 1, 'medium': 2, 'high': 3}
+
+
+def _max_severity(a: str, b: str) -> str:
+    """Return the higher of two severity strings."""
+    return a if _SEVERITY_ORDER[a] >= _SEVERITY_ORDER[b] else b
 
 
 # ============================================================
@@ -239,8 +276,7 @@ def luhn_check(card_number: str) -> bool:
     digits = [int(d) for d in card_number if d.isdigit()]
     if len(digits) < 13 or len(digits) > 19:
         return False
-    
-    # Luhn algorithm
+
     checksum = 0
     for i, digit in enumerate(reversed(digits)):
         if i % 2 == 1:
@@ -248,7 +284,7 @@ def luhn_check(card_number: str) -> bool:
             if digit > 9:
                 digit -= 9
         checksum += digit
-    
+
     return checksum % 10 == 0
 
 
@@ -256,17 +292,17 @@ def shannon_entropy(text: str) -> float:
     """Calculate Shannon entropy of a string."""
     if not text:
         return 0.0
-    
+
     freq = {}
     for char in text:
         freq[char] = freq.get(char, 0) + 1
-    
+
     length = len(text)
     entropy = 0.0
     for count in freq.values():
         prob = count / length
         entropy -= prob * math.log2(prob)
-    
+
     return entropy
 
 
@@ -283,7 +319,7 @@ class Detection:
     end: int
     confidence: float = 1.0
     metadata: Dict[str, Any] = field(default_factory=dict)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "type": self.type,
@@ -305,7 +341,7 @@ class DetectionResult:
     harmful: bool = False
     harmful_scores: Dict[str, float] = field(default_factory=dict)
     severity: str = "none"  # "none", "low", "medium", "high"
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to full dictionary format."""
         grouped: Dict[str, List[Dict[str, Any]]] = {}
@@ -313,7 +349,7 @@ class DetectionResult:
             if det.type not in grouped:
                 grouped[det.type] = []
             grouped[det.type].append(det.to_dict())
-        
+
         return {
             "original": self.original_text,
             "redacted": self.redacted_text,
@@ -324,21 +360,7 @@ class DetectionResult:
             "harmful_scores": self.harmful_scores,
             "severity": self.severity,
         }
-    
-    def to_legacy_dict(self) -> Dict[str, List[Dict[str, Any]]]:
-        """Convert to v0.1.x compatible format (just grouped detections)."""
-        grouped: Dict[str, List[Dict[str, Any]]] = {}
-        for det in self.detections:
-            if det.type not in grouped:
-                grouped[det.type] = []
-            grouped[det.type].append({
-                "span": det.text,
-                "start": det.start,
-                "end": det.end,
-                "confidence": det.confidence,
-            })
-        return grouped
-    
+
     def get_pii(self) -> List[Detection]:
         """Get only PII detections."""
         pii_types = {
@@ -350,7 +372,7 @@ class DetectionResult:
             DetectionType.LOCATION.value, DetectionType.ORGANIZATION.value,
         }
         return [d for d in self.detections if d.type in pii_types]
-    
+
     def get_secrets(self) -> List[Detection]:
         """Get only secret detections."""
         secret_types = {DetectionType.API_KEY.value, DetectionType.SECRET.value}
@@ -388,22 +410,22 @@ def redact_spans(
     """Redact all detected spans in text."""
     if not detections:
         return text
-    
+
     # Sort by start position (descending) to replace from end
     sorted_detections = sorted(detections, key=lambda d: d.start, reverse=True)
-    
+
     result = text
     for det in sorted_detections:
         replacement = apply_redaction(det.text, det.type, strategy)
         result = result[:det.start] + replacement + result[det.end:]
-    
+
     return result
 
 
 def find_secrets(text: str) -> List[Dict[str, Any]]:
     """Find secrets using three-tier detection."""
     secrets = []
-    
+
     # Tier 1: Structured prefixes
     for pattern, secret_type in STRUCTURED_SECRET_PATTERNS:
         for match in pattern.finditer(text):
@@ -414,7 +436,7 @@ def find_secrets(text: str) -> List[Dict[str, Any]]:
                 "type": secret_type,
                 "method": "structured_prefix",
             })
-    
+
     # Tier 2: AWS Secret Access Key
     for match in AWS_SECRET_RE.finditer(text):
         secret_value = match.group(1)
@@ -426,7 +448,7 @@ def find_secrets(text: str) -> List[Dict[str, Any]]:
                 "type": "aws_secret_key",
                 "method": "context_entropy",
             })
-    
+
     # Tier 3: Generic secrets with context
     for match in GENERIC_SECRET_RE.finditer(text):
         secret_value = match.group(1)
@@ -438,5 +460,5 @@ def find_secrets(text: str) -> List[Dict[str, Any]]:
                 "type": "generic_secret",
                 "method": "context_entropy",
             })
-    
+
     return secrets
