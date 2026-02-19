@@ -1,243 +1,203 @@
 """
-AI-powered detection for the PAID tier.
+AI-enhanced detection (mode='ai').
 
-This module provides enhanced detection using transformer models ONLY where
-AI significantly improves accuracy over regex:
-
-AI-ENHANCED (transformers):
-- Person names: 30% regex → 90% AI (huge improvement)
-- Locations: AI only (not detectable by regex)
-- Organizations: AI only (not detectable by regex)
+Uses transformer models for improved accuracy on:
+- Person names: 30% regex → 85-95% AI
+- Locations: Not available in regex → 80-90% AI
+- Organizations: Not available in regex → 75-85% AI
 - Harmful content: Better contextual understanding
 
-ALWAYS REGEX (no AI needed - 95%+ accuracy):
-- Email, phone, SSN, credit card, secrets, etc.
+Structured data (email, phone, SSN, secrets) still uses regex (95%+ accuracy).
 
-This selective approach provides:
-- 10x better accuracy for hard-to-detect content
-- Fast performance for structured data
-- Cost optimization (AI only where needed)
+Requirements:
+    pip install zero_harm_ai_detectors[ai]
 
 File: zero_harm_ai_detectors/ai_detectors.py
 """
-from __future__ import annotations
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
 
-import logging
-import re
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
-
-from .input_validation import validate_input
 from .core_patterns import (
-    # Redaction
-    RedactionStrategy,
-    apply_redaction,
-    # Validators
-    luhn_check,
-    # Detection types
-    DetectionType,
     Detection,
     DetectionResult,
-    # PII patterns (for structured data - always regex)
-    EMAIL_RE,
-    PHONE_RE,
-    SSN_RE,
-    CREDIT_CARD_RE,
-    BANK_ACCOUNT_KEYWORDS_RE,
-    BANK_ACCOUNT_DIGITS_RE,
-    DOB_PATTERNS,
-    DL_KEYWORDS_RE,
-    DL_TOKEN_RE,
-    MRN_KEYWORDS_RE,
-    MRN_DIGITS_RE,
-    ADDRESS_STREET_RE,
-    ADDRESS_POBOX_RE,
-    # Secrets (always regex)
-    find_secrets,
-    # Harmful cues (for boosting)
-    THREAT_CUES_RE,
+    DetectionType,
+    RedactionStrategy,
+    redact_spans,
+)
+from .regex_detectors import (
+    detect_emails,
+    detect_phones,
+    detect_ssns,
+    detect_credit_cards,
+    detect_bank_accounts,
+    detect_dob,
+    detect_drivers_licenses,
+    detect_mrn,
+    detect_addresses,
+    detect_secrets_regex,
 )
 
-logger = logging.getLogger(__name__)
-
 
 # ============================================================
-# Check for AI dependencies
+# Check AI Availability
 # ============================================================
-
-try:
-    from transformers import pipeline as hf_pipeline
-    import torch
-    AI_AVAILABLE = True
-except ImportError:
-    AI_AVAILABLE = False
-    hf_pipeline = None
-    torch = None
-
 
 def check_ai_available() -> bool:
-    """Check if AI dependencies are installed."""
-    return AI_AVAILABLE
+    """Check if AI dependencies are available."""
+    try:
+        import torch
+        import transformers
+        return True
+    except ImportError:
+        return False
+
+
+AI_AVAILABLE = check_ai_available()
 
 
 # ============================================================
-# Configuration
+# AI Configuration
 # ============================================================
 
 @dataclass
 class AIConfig:
-    """Configuration for AI-powered detection."""
-    # NER model for person names, locations, organizations
+    """Configuration for AI models."""
     ner_model: str = "dslim/bert-base-NER"
-    ner_threshold: float = 0.7
-    ner_aggregation: str = "simple"
-    
-    # Harmful content model
     harmful_model: str = "unitary/multilingual-toxic-xlm-roberta"
+    ner_threshold: float = 0.70
     harmful_threshold: float = 0.5
-    threat_boost_score: float = 0.6
-    
-    # Device
     device: str = "cpu"  # "cpu" or "cuda"
-    
-    # Caching
-    cache_models: bool = True
+    max_length: int = 512
 
 
 # ============================================================
-# AI-Powered NER Detector (Person, Location, Organization)
+# NER Detector (Names, Locations, Organizations)
 # ============================================================
 
 class NERDetector:
-    """
-    AI-powered Named Entity Recognition for:
-    - Person names (PER) - 85-95% accuracy
-    - Locations (LOC) - 80-90% accuracy
-    - Organizations (ORG) - 75-85% accuracy
-    """
+    """Named Entity Recognition using transformers."""
     
+    # Map NER labels to our detection types
     LABEL_MAP = {
-        "PER": DetectionType.PERSON,
-        "PERSON": DetectionType.PERSON,
-        "LOC": DetectionType.LOCATION,
-        "LOCATION": DetectionType.LOCATION,
-        "ORG": DetectionType.ORGANIZATION,
-        "ORGANIZATION": DetectionType.ORGANIZATION,
+        "PER": DetectionType.PERSON.value,
+        "LOC": DetectionType.LOCATION.value,
+        "ORG": DetectionType.ORGANIZATION.value,
+        "B-PER": DetectionType.PERSON.value,
+        "I-PER": DetectionType.PERSON.value,
+        "B-LOC": DetectionType.LOCATION.value,
+        "I-LOC": DetectionType.LOCATION.value,
+        "B-ORG": DetectionType.ORGANIZATION.value,
+        "I-ORG": DetectionType.ORGANIZATION.value,
     }
     
-    def __init__(self, config: AIConfig):
+    def __init__(self, config: Optional[AIConfig] = None):
         if not AI_AVAILABLE:
             raise ImportError(
-                "AI detection requires transformers and torch. "
+                "AI dependencies not available. "
                 "Install with: pip install 'zero_harm_ai_detectors[ai]'"
             )
         
-        self.config = config
-        device = 0 if config.device == "cuda" and torch.cuda.is_available() else -1
-        
-        logger.info(f"Loading NER model: {config.ner_model}")
-        self.pipeline = hf_pipeline(
-            "ner",
-            model=config.ner_model,
-            tokenizer=config.ner_model,
-            aggregation_strategy=config.ner_aggregation,
-            device=device,
-        )
+        self.config = config or AIConfig()
+        self._pipeline = None
+    
+    @property
+    def pipeline(self):
+        """Lazy load the NER pipeline."""
+        if self._pipeline is None:
+            from transformers import pipeline
+            self._pipeline = pipeline(
+                "ner",
+                model=self.config.ner_model,
+                aggregation_strategy="simple",
+                device=0 if self.config.device == "cuda" else -1,
+            )
+        return self._pipeline
     
     def detect(self, text: str) -> List[Detection]:
-        """Detect named entities using AI."""
-        results = []
+        """Detect named entities in text."""
+        if not text.strip():
+            return []
+        
+        detections = []
         
         try:
-            entities = self.pipeline(text)
+            # Run NER
+            results = self.pipeline(text[:self.config.max_length])
             
-            for entity in entities:
-                if entity["score"] < self.config.ner_threshold:
-                    continue
+            for entity in results:
+                label = entity.get("entity_group", entity.get("entity", ""))
+                det_type = self.LABEL_MAP.get(label)
                 
-                entity_type = entity["entity_group"].upper()
-                detection_type = self.LABEL_MAP.get(entity_type)
-                
-                if detection_type:
-                    results.append(Detection(
-                        type=detection_type.value,
-                        text=entity["word"].strip(),
+                if det_type and entity["score"] >= self.config.ner_threshold:
+                    detections.append(Detection(
+                        type=det_type,
+                        text=entity["word"],
                         start=entity["start"],
                         end=entity["end"],
-                        confidence=float(entity["score"]),
+                        confidence=entity["score"],
                         metadata={"method": "ai_ner", "model": self.config.ner_model},
                     ))
-        
         except Exception as e:
-            logger.warning(f"NER detection failed: {e}")
+            # Fall back gracefully on errors
+            pass
         
-        return results
+        return detections
 
 
 # ============================================================
-# AI-Powered Harmful Content Detector
+# Harmful Content Detector
 # ============================================================
 
 class HarmfulContentDetector:
-    """
-    AI-powered harmful content detection using transformer model.
+    """Harmful content detection using transformers."""
     
-    Detects: toxic, threat, insult, obscene, identity_hate
-    """
-    
-    def __init__(self, config: AIConfig):
+    def __init__(self, config: Optional[AIConfig] = None):
         if not AI_AVAILABLE:
             raise ImportError(
-                "AI detection requires transformers and torch. "
+                "AI dependencies not available. "
                 "Install with: pip install 'zero_harm_ai_detectors[ai]'"
             )
         
-        self.config = config
-        device = 0 if config.device == "cuda" and torch.cuda.is_available() else -1
-        
-        logger.info(f"Loading harmful content model: {config.harmful_model}")
-        self.pipeline = hf_pipeline(
-            "text-classification",
-            model=config.harmful_model,
-            tokenizer=config.harmful_model,
-            top_k=None,
-            function_to_apply="sigmoid",
-            device=device,
-        )
+        self.config = config or AIConfig()
+        self._pipeline = None
     
-    def detect(self, text: str) -> Tuple[bool, Dict[str, float], str, List[str]]:
-        """
-        Detect harmful content.
-        
-        Returns: (is_harmful, scores, severity, active_labels)
-        """
-        try:
-            raw_scores = self.pipeline(text)[0]
-            scores = {
-                item["label"].strip(): float(item["score"])
-                for item in raw_scores
-            }
-            
-            # Boost threat score if threat cues present
-            if THREAT_CUES_RE.search(text):
-                for label in scores:
-                    if label.lower() == "threat":
-                        scores[label] = max(scores[label], self.config.threat_boost_score)
-            
-            # Determine active labels
-            active_labels = [
-                label for label, score in scores.items()
-                if score >= self.config.harmful_threshold
-            ]
-            
-            is_harmful = any(
-                score >= self.config.harmful_threshold
-                for score in scores.values()
+    @property
+    def pipeline(self):
+        """Lazy load the classification pipeline."""
+        if self._pipeline is None:
+            from transformers import pipeline
+            self._pipeline = pipeline(
+                "text-classification",
+                model=self.config.harmful_model,
+                top_k=None,
+                device=0 if self.config.device == "cuda" else -1,
             )
+        return self._pipeline
+    
+    def detect(self, text: str) -> Dict[str, Any]:
+        """Detect harmful content in text."""
+        if not text.strip():
+            return {"harmful": False, "severity": "none", "scores": {}}
+        
+        try:
+            results = self.pipeline(text[:self.config.max_length])
             
-            # Calculate severity
-            max_score = max(scores.values()) if scores else 0
-            if max_score >= 0.85:
+            # Process results
+            scores = {}
+            max_score = 0.0
+            
+            if results and len(results) > 0:
+                for item in results[0] if isinstance(results[0], list) else results:
+                    label = item["label"].lower()
+                    score = item["score"]
+                    scores[label] = score
+                    if score > max_score and label != "neutral":
+                        max_score = score
+            
+            is_harmful = max_score >= self.config.harmful_threshold
+            
+            # Determine severity
+            if max_score >= 0.8:
                 severity = "high"
             elif max_score >= 0.6:
                 severity = "medium"
@@ -246,211 +206,59 @@ class HarmfulContentDetector:
             else:
                 severity = "none"
             
-            return is_harmful, scores, severity, active_labels
-        
+            return {
+                "harmful": is_harmful,
+                "severity": severity,
+                "scores": scores,
+            }
         except Exception as e:
-            logger.warning(f"Harmful content detection failed: {e}")
-            return False, {}, "none", []
+            return {"harmful": False, "severity": "none", "scores": {}}
 
 
 # ============================================================
-# Regex-based PII Detectors (always used, even in AI mode)
-# ============================================================
-
-CONTEXT_WINDOW = 30
-
-
-def _get_context(text: str, start: int, end: int, window: int = CONTEXT_WINDOW) -> str:
-    return text[max(0, start - window):min(len(text), end + window)]
-
-
-def detect_structured_pii(text: str) -> List[Detection]:
-    """
-    Detect structured PII using regex (95%+ accuracy).
-    
-    Always used for: email, phone, SSN, credit card, bank account,
-    DOB, driver's license, MRN, address.
-    """
-    results = []
-    
-    # Email (99%+ accuracy)
-    for m in EMAIL_RE.finditer(text):
-        results.append(Detection(
-            type=DetectionType.EMAIL.value,
-            text=m.group(),
-            start=m.start(),
-            end=m.end(),
-            confidence=1.0,
-            metadata={"method": "regex"},
-        ))
-    
-    # Phone (95%+ accuracy)
-    for m in PHONE_RE.finditer(text):
-        results.append(Detection(
-            type=DetectionType.PHONE.value,
-            text=m.group(),
-            start=m.start(),
-            end=m.end(),
-            confidence=1.0,
-            metadata={"method": "regex"},
-        ))
-    
-    # SSN (95%+ accuracy)
-    for m in SSN_RE.finditer(text):
-        results.append(Detection(
-            type=DetectionType.SSN.value,
-            text=m.group(),
-            start=m.start(),
-            end=m.end(),
-            confidence=1.0,
-            metadata={"method": "regex"},
-        ))
-    
-    # Credit Card (90%+ with Luhn)
-    for m in CREDIT_CARD_RE.finditer(text):
-        raw = m.group()
-        digits_only = re.sub(r"\D", "", raw)
-        if luhn_check(digits_only):
-            results.append(Detection(
-                type=DetectionType.CREDIT_CARD.value,
-                text=raw,
-                start=m.start(),
-                end=m.end(),
-                confidence=0.95,
-                metadata={"method": "regex+luhn"},
-            ))
-    
-    # Bank Account (context-dependent)
-    for m in BANK_ACCOUNT_DIGITS_RE.finditer(text):
-        ctx = _get_context(text, m.start(), m.end())
-        if BANK_ACCOUNT_KEYWORDS_RE.search(ctx):
-            if not re.fullmatch(r"\d{9}", m.group()):
-                results.append(Detection(
-                    type=DetectionType.BANK_ACCOUNT.value,
-                    text=m.group(),
-                    start=m.start(),
-                    end=m.end(),
-                    confidence=0.85,
-                    metadata={"method": "regex+context"},
-                ))
-    
-    # DOB
-    for pat in DOB_PATTERNS:
-        for m in pat.finditer(text):
-            results.append(Detection(
-                type=DetectionType.DOB.value,
-                text=m.group(),
-                start=m.start(),
-                end=m.end(),
-                confidence=0.90,
-                metadata={"method": "regex"},
-            ))
-    
-    # Driver's License (context-dependent)
-    ca_re = re.compile(r"\b[A-Z]\d{7}\b")
-    ny_re = re.compile(r"\b([A-Z]\d{7}|\d{9}|\d{8})\b")
-    tx_re = re.compile(r"\b\d{8}\b")
-    
-    for m in DL_TOKEN_RE.finditer(text):
-        ctx = _get_context(text, m.start(), m.end())
-        token = m.group()
-        if (DL_KEYWORDS_RE.search(ctx) or 
-            ca_re.fullmatch(token) or 
-            ny_re.fullmatch(token) or
-            tx_re.fullmatch(token)):
-            results.append(Detection(
-                type=DetectionType.DRIVERS_LICENSE.value,
-                text=token,
-                start=m.start(),
-                end=m.end(),
-                confidence=0.80,
-                metadata={"method": "regex+context"},
-            ))
-    
-    # MRN (context-dependent)
-    for m in MRN_DIGITS_RE.finditer(text):
-        ctx = _get_context(text, m.start(), m.end())
-        if MRN_KEYWORDS_RE.search(ctx):
-            results.append(Detection(
-                type=DetectionType.MEDICAL_RECORD_NUMBER.value,
-                text=m.group(),
-                start=m.start(),
-                end=m.end(),
-                confidence=0.85,
-                metadata={"method": "regex+context"},
-            ))
-    
-    # Address
-    for m in ADDRESS_STREET_RE.finditer(text):
-        results.append(Detection(
-            type=DetectionType.ADDRESS.value,
-            text=m.group(),
-            start=m.start(),
-            end=m.end(),
-            confidence=0.85,
-            metadata={"method": "regex"},
-        ))
-    
-    for m in ADDRESS_POBOX_RE.finditer(text):
-        results.append(Detection(
-            type=DetectionType.ADDRESS.value,
-            text=m.group(),
-            start=m.start(),
-            end=m.end(),
-            confidence=0.90,
-            metadata={"method": "regex"},
-        ))
-    
-    return results
-
-
-def detect_secrets_regex(text: str) -> List[Detection]:
-    """Detect secrets using regex (always regex, 95%+ accuracy)."""
-    findings = find_secrets(text)
-    return [
-        Detection(
-            type=finding.get("type", DetectionType.API_KEY.value),
-            text=finding["span"],
-            start=finding["start"],
-            end=finding["end"],
-            confidence=finding.get("confidence", 0.99),
-            metadata={"method": "regex"},
-        )
-        for finding in findings
-    ]
-
-
-# ============================================================
-# Unified AI Pipeline
+# AI Pipeline (Combines NER + Harmful + Regex)
 # ============================================================
 
 class AIPipeline:
     """
-    AI-powered detection pipeline (PAID tier).
+    Complete AI detection pipeline.
     
-    Uses AI selectively:
-    - AI for: person names, locations, organizations, harmful content
-    - Regex for: email, phone, SSN, credit card, secrets (95%+ accuracy)
-    
-    Example:
-        pipeline = AIPipeline()
-        result = pipeline.detect("Contact John Smith at john@example.com")
-        print(result.redacted_text)
+    Uses AI for: person names, locations, organizations, harmful content.
+    Uses regex for: email, phone, SSN, credit card, secrets (95%+ accuracy).
     """
     
     def __init__(self, config: Optional[AIConfig] = None):
-        if not AI_AVAILABLE:
-            raise ImportError(
-                "AI detection requires transformers and torch. "
-                "Install with: pip install 'zero_harm_ai_detectors[ai]'"
-            )
-        
         self.config = config or AIConfig()
-        
-        logger.info("Initializing AI Pipeline...")
-        self.ner_detector = NERDetector(self.config)
-        self.harmful_detector = HarmfulContentDetector(self.config)
-        logger.info("AI Pipeline ready")
+        self._ner_detector = None
+        self._harmful_detector = None
+    
+    @property
+    def ner_detector(self) -> NERDetector:
+        """Lazy load NER detector."""
+        if self._ner_detector is None:
+            self._ner_detector = NERDetector(self.config)
+        return self._ner_detector
+    
+    @property
+    def harmful_detector(self) -> HarmfulContentDetector:
+        """Lazy load harmful content detector."""
+        if self._harmful_detector is None:
+            self._harmful_detector = HarmfulContentDetector(self.config)
+        return self._harmful_detector
+    
+    def detect_structured_pii(self, text: str) -> List[Detection]:
+        """Detect structured PII using regex (high accuracy)."""
+        detections = []
+        detections.extend(detect_emails(text))
+        detections.extend(detect_phones(text))
+        detections.extend(detect_ssns(text))
+        detections.extend(detect_credit_cards(text))
+        detections.extend(detect_bank_accounts(text))
+        detections.extend(detect_dob(text))
+        detections.extend(detect_drivers_licenses(text))
+        detections.extend(detect_mrn(text))
+        detections.extend(detect_addresses(text))
+        return detections
     
     def detect(
         self,
@@ -461,135 +269,92 @@ class AIPipeline:
         redaction_strategy: RedactionStrategy = RedactionStrategy.TOKEN,
     ) -> DetectionResult:
         """
-        Run detection pipeline.
+        Run full AI-enhanced detection.
         
         Args:
             text: Input text to scan
-            detect_pii: Detect PII (structured via regex + AI for names/locations/orgs)
-            detect_secrets: Detect secrets (always regex)
-            detect_harmful: Detect harmful content (AI-powered)
+            detect_pii: Whether to detect PII
+            detect_secrets: Whether to detect secrets
+            detect_harmful: Whether to detect harmful content
             redaction_strategy: How to redact detected content
         
         Returns:
             DetectionResult with all findings
         """
-        text = validate_input(text, mode="ai")
-        
         if not text:
             return DetectionResult(
                 original_text="",
                 redacted_text="",
                 detections=[],
-                tier="paid",
+                mode="ai",
             )
         
         all_detections: List[Detection] = []
         
-        # PII Detection
+        # PII detection
         if detect_pii:
-            # Structured PII (always regex - 95%+ accuracy)
-            all_detections.extend(detect_structured_pii(text))
+            # Structured PII via regex (high accuracy)
+            all_detections.extend(self.detect_structured_pii(text))
             
-            # Names, Locations, Organizations (AI - 85-95% accuracy)
+            # Names, locations, orgs via AI NER
             all_detections.extend(self.ner_detector.detect(text))
         
-        # Secrets Detection (always regex - 95%+ accuracy)
+        # Secrets detection (always regex - 95%+ accuracy)
         if detect_secrets:
             all_detections.extend(detect_secrets_regex(text))
         
-        # Harmful Content Detection (AI-powered)
+        # Harmful content detection
         is_harmful = False
         harmful_scores: Dict[str, float] = {}
         severity = "none"
         
         if detect_harmful:
-            is_harmful, harmful_scores, severity, active_labels = self.harmful_detector.detect(text)
-            if is_harmful:
-                all_detections.append(Detection(
-                    type=DetectionType.HARMFUL_CONTENT.value,
-                    text=text,
-                    start=0,
-                    end=len(text),
-                    confidence=max(harmful_scores.values()) if harmful_scores else 0.5,
-                    metadata={
-                        "method": "ai_transformer",
-                        "model": self.config.harmful_model,
-                        "labels": active_labels,
-                        "scores": harmful_scores,
-                    },
-                ))
+            harmful_result = self.harmful_detector.detect(text)
+            is_harmful = harmful_result["harmful"]
+            harmful_scores = harmful_result["scores"]
+            severity = harmful_result["severity"]
         
-        # Remove overlapping detections
-        all_detections = self._remove_overlaps(all_detections)
+        # Remove duplicates
+        seen = set()
+        unique_detections = []
+        for det in all_detections:
+            key = (det.start, det.end, det.type)
+            if key not in seen:
+                seen.add(key)
+                unique_detections.append(det)
         
-        # Redact text
-        redacted = self._redact_detections(text, all_detections, redaction_strategy)
+        # Redact
+        redacted = redact_spans(text, unique_detections, redaction_strategy)
         
         return DetectionResult(
             original_text=text,
             redacted_text=redacted,
-            detections=all_detections,
-            tier="paid",
+            detections=unique_detections,
+            mode="ai",
             harmful=is_harmful,
             harmful_scores=harmful_scores,
             severity=severity,
         )
-    
-    @staticmethod
-    def _remove_overlaps(detections: List[Detection]) -> List[Detection]:
-        """Remove overlapping detections, keeping higher confidence."""
-        if not detections:
-            return []
-        
-        sorted_dets = sorted(detections, key=lambda x: (x.start, -x.confidence))
-        result: List[Detection] = []
-        
-        for det in sorted_dets:
-            overlaps = False
-            for existing in result:
-                if not (det.end <= existing.start or det.start >= existing.end):
-                    overlaps = True
-                    if det.confidence > existing.confidence:
-                        result.remove(existing)
-                        result.append(det)
-                    break
-            if not overlaps:
-                result.append(det)
-        
-        return sorted(result, key=lambda x: x.start)
-    
-    def _redact_detections(
-        self,
-        text: str,
-        detections: List[Detection],
-        strategy: RedactionStrategy,
-    ) -> str:
-        """Redact all detections from text."""
-        sorted_dets = sorted(detections, key=lambda x: x.start, reverse=True)
-        
-        result = text
-        for det in sorted_dets:
-            if det.type == DetectionType.HARMFUL_CONTENT.value:
-                continue
-            replacement = apply_redaction(det.text, strategy, det.type)
-            result = result[:det.start] + replacement + result[det.end:]
-        
-        return result
 
 
 # ============================================================
-# Global Pipeline Instance
+# Module-level Pipeline Instance
 # ============================================================
 
-_global_pipeline: Optional[AIPipeline] = None
+_default_pipeline: Optional[AIPipeline] = None
 
 
 def get_pipeline(config: Optional[AIConfig] = None) -> AIPipeline:
-    """Get or create global AI pipeline instance."""
-    global _global_pipeline
-    if _global_pipeline is None:
-        _global_pipeline = AIPipeline(config)
-    return _global_pipeline
+    """Get or create the default AI pipeline."""
+    global _default_pipeline
+    
+    if config is not None:
+        return AIPipeline(config)
+    
+    if _default_pipeline is None:
+        _default_pipeline = AIPipeline()
+    
+    return _default_pipeline
 
 
 def detect_all_ai(
@@ -597,24 +362,28 @@ def detect_all_ai(
     detect_pii: bool = True,
     detect_secrets: bool = True,
     detect_harmful: bool = True,
-    redaction_strategy: str = "token",
+    redaction_strategy: RedactionStrategy = RedactionStrategy.TOKEN,
+    config: Optional[AIConfig] = None,
 ) -> DetectionResult:
     """
-    Convenience function: Run AI detection with default settings.
+    Convenience function for AI detection.
     
-    Returns DetectionResult (same format as free tier).
+    Args:
+        text: Input text
+        detect_pii: Whether to detect PII
+        detect_secrets: Whether to detect secrets
+        detect_harmful: Whether to detect harmful content
+        redaction_strategy: Redaction strategy
+        config: Optional AI configuration
+    
+    Returns:
+        DetectionResult
     """
-    pipeline = get_pipeline()
-    
-    try:
-        strategy = RedactionStrategy(redaction_strategy)
-    except ValueError:
-        strategy = RedactionStrategy.TOKEN
-    
+    pipeline = get_pipeline(config)
     return pipeline.detect(
         text,
         detect_pii=detect_pii,
         detect_secrets=detect_secrets,
         detect_harmful=detect_harmful,
-        redaction_strategy=strategy,
+        redaction_strategy=redaction_strategy,
     )

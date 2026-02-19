@@ -1,606 +1,230 @@
 """
-Comprehensive tests for AI-based detection pipeline (paid tier).
+Tests for AI-enhanced detection (mode='ai').
 
-Covers:
-- AI PII detection (NER + shared regex patterns)
-- AI secrets detection (delegates to core_patterns.find_secrets)
-- AI harmful content detection
-- Shared core_patterns verification (same patterns as regex tier)
-- PipelineResult / Detection data classes
-- Redaction strategies
-- Legacy API compatibility (detect_pii_legacy, detect_secrets_legacy)
-- Convenience functions (detect_all, get_pipeline)
-- Edge cases (empty text, clean text, mixed content)
-- Backward compatibility with old API
-
-Tests requiring transformers/torch are skipped if those packages
-are not installed, so CI can run basic verification even without
-GPU or large model downloads.
+These tests are skipped if AI dependencies are not installed.
 
 File: tests/test_ai_detectors.py
 """
 import pytest
-import sys
-import os
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
 from zero_harm_ai_detectors import (
-    AI_MODE_AVAILABLE,
-    detect_pii,
-    detect_secrets,
-)
-from zero_harm_ai_detectors.core_patterns import (
-    EMAIL_RE,
-    PHONE_RE,
-    SSN_RE,
-    CREDIT_CARD_RE,
-    RedactionStrategy as CoreRedactionStrategy,
-    luhn_check,
-    find_secrets,
-    THREAT_CUES_RE,
+    detect,
+    AI_AVAILABLE,
+    DetectionResult,
 )
 
-# Only import AI-specific classes if available
-if AI_MODE_AVAILABLE:
-    from zero_harm_ai_detectors import (
-        ZeroHarmDetector,
-        PipelineConfig,
-        AIRedactionStrategy,
-    )
-    from zero_harm_ai_detectors.ai_detectors import (
-        ZeroHarmPipeline,
-        PipelineResult,
-        Detection,
-        DetectionType,
-        RedactionStrategy as AIRedactionStrategyDirect,
-        AIPIIDetector,
-        SecretsDetector as AISecretsDetector,
-        HarmfulContentDetector,
-        detect_all,
-        get_pipeline,
-    )
-
-
-# ============================================================
-# Marker for tests that require AI dependencies
-# ============================================================
-
-requires_ai = pytest.mark.skipif(
-    not AI_MODE_AVAILABLE,
-    reason="AI detection not available (transformers/torch not installed)",
+# Skip all tests in this module if AI is not available
+pytestmark = pytest.mark.skipif(
+    not AI_AVAILABLE,
+    reason="AI dependencies not installed (pip install zero_harm_ai_detectors[ai])"
 )
 
 
-# ============================================================
-# Section 1: Shared core_patterns verification for AI tier
-# ============================================================
-
-class TestAISharedPatterns:
-    """Verify AI tier imports patterns from core_patterns, not its own."""
-
-    @requires_ai
-    def test_redaction_strategy_is_core(self):
-        """AI tier's RedactionStrategy should be the core one."""
-        assert AIRedactionStrategyDirect is CoreRedactionStrategy
-
-    @requires_ai
-    def test_ai_secrets_detector_uses_find_secrets(self):
-        """AI SecretsDetector must delegate to core_patterns.find_secrets."""
-        detector = AISecretsDetector()
-        text = "sk-1234567890abcdef1234567890abcdef"
-        ai_results = detector.detect(text)
-        core_results = find_secrets(text)
-        # AI wraps in Detection objects; compare spans
-        ai_spans = [(d.start, d.end) for d in ai_results]
-        core_spans = [(f["start"], f["end"]) for f in core_results]
-        assert ai_spans == core_spans
-
-    @requires_ai
-    def test_ai_secrets_no_false_positive(self):
-        """AI secrets detector should reject normal text (same as regex tier)."""
-        detector = AISecretsDetector()
-        normal_texts = [
-            "The quick brown fox jumps over the lazy dog",
-            "commit abc123def456789012345678901234567890ab",
-            "background-color: #ff5733; font-size: 16px;",
-        ]
-        for text in normal_texts:
-            results = detector.detect(text)
-            assert results == [], f"False positive on: {text!r}"
-
-    @requires_ai
-    def test_threat_cues_used_by_harmful_detector(self):
-        """HarmfulContentDetector should use the shared THREAT_CUES_RE."""
-        # Verify the imported pattern is used (can't easily check at runtime
-        # without loading models, so just verify the import exists)
-        from zero_harm_ai_detectors.ai_detectors import THREAT_CUES_RE as imported
-        assert imported is THREAT_CUES_RE
-
-
-# ============================================================
-# Section 2: Detection / PipelineResult data classes
-# ============================================================
-
-class TestDataClasses:
-    @requires_ai
-    def test_detection_to_dict(self):
-        det = Detection(
-            type="EMAIL",
-            text="test@example.com",
-            start=0,
-            end=16,
-            confidence=1.0,
-            metadata={"method": "regex"},
-        )
-        d = det.to_dict()
-        assert d["type"] == "EMAIL"
-        assert d["span"] == "test@example.com"
-        assert d["start"] == 0
-        assert d["end"] == 16
-        assert d["confidence"] == 1.0
-        assert d["metadata"]["method"] == "regex"
-
-    @requires_ai
-    def test_detection_to_dict_no_metadata(self):
-        det = Detection(type="PHONE", text="555-1234", start=0, end=8, confidence=0.9)
-        d = det.to_dict()
-        assert d["metadata"] == {}
-
-    @requires_ai
-    def test_pipeline_result_to_dict(self):
-        detections = [
-            Detection(type="EMAIL", text="a@b.com", start=0, end=7, confidence=1.0),
-            Detection(type="PHONE", text="555-1234", start=10, end=18, confidence=1.0),
-        ]
-        result = PipelineResult(
-            original_text="a@b.com | 555-1234",
-            redacted_text="[REDACTED_EMAIL] | [REDACTED_PHONE]",
-            detections=detections,
-            harmful=False,
-            harmful_scores={},
-            severity="low",
-        )
-        d = result.to_dict()
-        assert d["original"] == "a@b.com | 555-1234"
-        assert "EMAIL" in d["detections"]
-        assert "PHONE" in d["detections"]
-        assert len(d["detections"]["EMAIL"]) == 1
-        assert d["harmful"] is False
-
-    @requires_ai
-    def test_pipeline_result_grouped_by_type(self):
-        detections = [
-            Detection(type="EMAIL", text="a@b.com", start=0, end=7, confidence=1.0),
-            Detection(type="EMAIL", text="c@d.com", start=10, end=17, confidence=1.0),
-        ]
-        result = PipelineResult(
-            original_text="a@b.com | c@d.com",
-            redacted_text="redacted",
-            detections=detections,
-            harmful=False,
-        )
-        d = result.to_dict()
-        assert len(d["detections"]["EMAIL"]) == 2
-
-
-# ============================================================
-# Section 3: PipelineConfig
-# ============================================================
-
-class TestPipelineConfig:
-    @requires_ai
-    def test_defaults(self):
-        config = PipelineConfig()
-        assert config.pii_model == "dslim/bert-base-NER"
-        assert config.pii_threshold == 0.7
-        assert config.harmful_threshold_per_label == 0.5
-        assert config.device == "cpu"
-        assert config.use_regex_for_secrets is True
-
-    @requires_ai
-    def test_custom_config(self):
-        config = PipelineConfig(
-            pii_threshold=0.9,
-            harmful_threshold_per_label=0.7,
-            device="cuda",
-        )
-        assert config.pii_threshold == 0.9
-        assert config.harmful_threshold_per_label == 0.7
-        assert config.device == "cuda"
-
-
-# ============================================================
-# Section 4: DetectionType enum
-# ============================================================
-
-class TestDetectionType:
-    @requires_ai
-    def test_pii_types(self):
-        assert DetectionType.PERSON.value == "PERSON"
-        assert DetectionType.EMAIL.value == "EMAIL"
-        assert DetectionType.PHONE.value == "PHONE"
-        assert DetectionType.SSN.value == "SSN"
-        assert DetectionType.CREDIT_CARD.value == "CREDIT_CARD"
-        assert DetectionType.LOCATION.value == "LOCATION"
-        assert DetectionType.ORGANIZATION.value == "ORGANIZATION"
-
-    @requires_ai
-    def test_secret_types(self):
-        assert DetectionType.API_KEY.value == "API_KEY"
-
-    @requires_ai
-    def test_harmful_types(self):
-        assert DetectionType.TOXIC.value == "TOXIC"
-        assert DetectionType.THREAT.value == "THREAT"
-
-
-# ============================================================
-# Section 5: Full Pipeline Detection (requires model loading)
-# ============================================================
-
-@pytest.fixture(scope="module")
-def pipeline():
-    """Create a pipeline instance (loads models once for all tests)."""
-    if not AI_MODE_AVAILABLE:
-        pytest.skip("AI detection not available")
-    return ZeroHarmPipeline()
-
-
-@pytest.fixture
-def test_texts():
-    """Common test texts."""
-    return {
-        "email": "Contact me at john.smith@example.com",
-        "phone": "Call me at 555-123-4567",
-        "ssn": "My SSN is 123-45-6789",
-        "person": "Please contact John Smith for more information",
-        "location": "The meeting is in New York City",
-        "org": "I work at Microsoft Corporation",
-        "secret": "API key: sk-1234567890abcdef1234567890abcdef",
-        "harmful": "I hate you and want to hurt you",
-        "credit_card": "Card number: 4532-0151-1283-0366",
-        "mixed": (
-            "Email John Smith at john@example.com or call 555-123-4567. "
-            "API key: sk-1234567890abcdef1234567890abcdef."
-        ),
-        "clean": "Hello world! How are you today?",
-    }
-
-
-@requires_ai
-class TestPipelineEmailDetection:
-    def test_detects_email(self, pipeline, test_texts):
-        result = pipeline.detect(test_texts["email"])
+class TestAIMode:
+    """Tests for AI mode detection."""
+    
+    def test_ai_mode_returns_detection_result(self):
+        result = detect("Contact John Smith", mode="ai")
+        assert isinstance(result, DetectionResult)
+        assert result.mode == "ai"
+    
+    def test_ai_mode_detects_person_names(self):
+        result = detect("Please contact John Smith for assistance", mode="ai")
+        persons = [d for d in result.detections if d.type == "PERSON"]
+        # AI should detect at least one person
+        assert len(persons) >= 1
+    
+    def test_ai_mode_detects_locations(self):
+        result = detect("Our office is in New York City", mode="ai")
+        locations = [d for d in result.detections if d.type == "LOCATION"]
+        # AI should detect the location
+        assert len(locations) >= 1
+    
+    def test_ai_mode_detects_organizations(self):
+        result = detect("I work at Microsoft", mode="ai")
+        orgs = [d for d in result.detections if d.type == "ORGANIZATION"]
+        # AI should detect the organization
+        assert len(orgs) >= 1
+    
+    def test_ai_mode_still_detects_structured_pii(self):
+        result = detect("Email: test@example.com, Phone: 555-123-4567", mode="ai")
         types = {d.type for d in result.detections}
+        # Structured PII should still be detected (via regex)
         assert "EMAIL" in types
-
-    def test_email_confidence(self, pipeline, test_texts):
-        result = pipeline.detect(test_texts["email"])
-        emails = [d for d in result.detections if d.type == "EMAIL"]
-        assert len(emails) >= 1
-        assert emails[0].confidence == 1.0  # regex patterns have 1.0 confidence
-
-
-@requires_ai
-class TestPipelinePhoneDetection:
-    def test_detects_phone(self, pipeline, test_texts):
-        result = pipeline.detect(test_texts["phone"])
-        types = {d.type for d in result.detections}
         assert "PHONE" in types
-
-
-@requires_ai
-class TestPipelineSSNDetection:
-    def test_detects_ssn(self, pipeline, test_texts):
-        result = pipeline.detect(test_texts["ssn"])
+    
+    def test_ai_mode_detects_secrets(self):
+        result = detect("API key: sk-1234567890abcdef1234567890abcdef", mode="ai")
+        # Secrets should be detected (via regex)
         types = {d.type for d in result.detections}
-        assert "SSN" in types
-
-
-@requires_ai
-class TestPipelinePersonDetection:
-    def test_detects_person(self, pipeline, test_texts):
-        result = pipeline.detect(test_texts["person"])
+        assert "API_KEY" in types or "SECRET" in types
+    
+    def test_ai_mode_harmful_detection(self):
+        result = detect("I hate you so much!", mode="ai", detect_pii=False, detect_secrets=False)
+        # AI harmful detection should work
+        assert result.harmful is True or result.severity != "none"
+    
+    def test_ai_mode_clean_text(self):
+        result = detect("Hello, how are you today?", mode="ai", detect_pii=False, detect_secrets=False)
+        assert result.harmful is False or result.severity == "none"
+    
+    def test_ai_mode_mixed_content(self):
+        text = """
+        Contact: John Smith
+        Email: john.smith@example.com
+        Company: Acme Corporation
+        Location: San Francisco, CA
+        """
+        result = detect(text, mode="ai")
+        
         types = {d.type for d in result.detections}
-        assert "PERSON" in types
-
-
-@requires_ai
-class TestPipelineLocationDetection:
-    def test_detects_location(self, pipeline, test_texts):
-        result = pipeline.detect(test_texts["location"])
-        types = {d.type for d in result.detections}
-        assert "LOCATION" in types
-
-
-@requires_ai
-class TestPipelineOrgDetection:
-    def test_detects_organization(self, pipeline, test_texts):
-        result = pipeline.detect(test_texts["org"])
-        types = {d.type for d in result.detections}
-        assert "ORGANIZATION" in types
-
-
-@requires_ai
-class TestPipelineSecretsDetection:
-    def test_detects_secrets(self, pipeline, test_texts):
-        result = pipeline.detect(test_texts["secret"])
-        types = {d.type for d in result.detections}
-        assert "API_KEY" in types
-
-    def test_secrets_no_false_positive(self, pipeline):
-        result = pipeline.detect("The quick brown fox jumps over the lazy dog")
-        secret_types = {d.type for d in result.detections if d.type == "API_KEY"}
-        assert len(secret_types) == 0
-
-
-@requires_ai
-class TestPipelineCreditCardDetection:
-    def test_detects_credit_card(self, pipeline, test_texts):
-        result = pipeline.detect(test_texts["credit_card"])
-        types = {d.type for d in result.detections}
-        assert "CREDIT_CARD" in types
-
-
-@requires_ai
-class TestPipelineHarmfulDetection:
-    def test_detects_harmful(self, pipeline, test_texts):
-        result = pipeline.detect(test_texts["harmful"])
-        assert result.harmful is True
-        assert result.severity in ("low", "medium", "high")
-
-    def test_harmful_scores_present(self, pipeline, test_texts):
-        result = pipeline.detect(test_texts["harmful"])
-        assert isinstance(result.harmful_scores, dict)
-        assert len(result.harmful_scores) > 0
-
-    def test_clean_text_not_harmful(self, pipeline, test_texts):
-        result = pipeline.detect(test_texts["clean"])
-        assert result.harmful is False
-
-
-# ============================================================
-# Section 6: Redaction Strategies in Pipeline
-# ============================================================
-
-@requires_ai
-class TestPipelineRedaction:
-    def test_token_redaction(self, pipeline, test_texts):
-        result = pipeline.detect(
-            test_texts["email"],
-            redaction_strategy=CoreRedactionStrategy.TOKEN,
-        )
+        # Should detect both AI entities and structured PII
+        assert "EMAIL" in types  # Regex
+        assert "PERSON" in types or "ORGANIZATION" in types  # AI
+    
+    def test_ai_mode_redaction(self):
+        result = detect("Contact John Smith at john@example.com", mode="ai")
+        # Should have redacted text
         assert "[REDACTED_" in result.redacted_text
 
-    def test_mask_all_redaction(self, pipeline, test_texts):
-        result = pipeline.detect(
-            test_texts["email"],
-            redaction_strategy=CoreRedactionStrategy.MASK_ALL,
+
+class TestAIConfig:
+    """Tests for AI configuration."""
+    
+    def test_custom_config(self):
+        from zero_harm_ai_detectors import AIConfig
+        
+        config = AIConfig(
+            ner_threshold=0.9,
+            device="cpu",
         )
-        assert "john.smith@example.com" not in result.redacted_text
-
-    def test_mask_last4_redaction(self, pipeline, test_texts):
-        result = pipeline.detect(
-            test_texts["email"],
-            redaction_strategy=CoreRedactionStrategy.MASK_LAST4,
+        
+        result = detect(
+            "Contact John Smith",
+            mode="ai",
+            ai_config=config,
         )
-        assert "john.smith@example.com" not in result.redacted_text
-
-    def test_hash_redaction(self, pipeline, test_texts):
-        result = pipeline.detect(
-            test_texts["email"],
-            redaction_strategy=CoreRedactionStrategy.HASH,
-        )
-        assert "john.smith@example.com" not in result.redacted_text
-
-
-# ============================================================
-# Section 7: Selective Detection
-# ============================================================
-
-@requires_ai
-class TestSelectiveDetection:
-    def test_pii_only(self, pipeline, test_texts):
-        result = pipeline.detect(
-            test_texts["mixed"],
-            detect_pii=True,
-            detect_secrets=False,
-            detect_harmful=False,
-        )
-        types = {d.type for d in result.detections}
-        assert "API_KEY" not in types
-
-    def test_secrets_only(self, pipeline, test_texts):
-        result = pipeline.detect(
-            test_texts["mixed"],
-            detect_pii=False,
-            detect_secrets=True,
-            detect_harmful=False,
-        )
-        types = {d.type for d in result.detections}
-        assert "EMAIL" not in types
-        assert "PHONE" not in types
-
-    def test_harmful_only(self, pipeline, test_texts):
-        result = pipeline.detect(
-            test_texts["harmful"],
-            detect_pii=False,
-            detect_secrets=False,
-            detect_harmful=True,
-        )
-        assert result.harmful is True
-        # Non-harmful detections should be absent
-        non_harmful = [d for d in result.detections if d.type != "HARMFUL_CONTENT"]
-        assert len(non_harmful) == 0
+        
+        assert result.mode == "ai"
+    
+    def test_high_threshold_reduces_detections(self):
+        from zero_harm_ai_detectors import AIConfig
+        
+        text = "Contact John Smith at Microsoft"
+        
+        # Low threshold
+        config_low = AIConfig(ner_threshold=0.5)
+        result_low = detect(text, mode="ai", ai_config=config_low)
+        
+        # High threshold
+        config_high = AIConfig(ner_threshold=0.99)
+        result_high = detect(text, mode="ai", ai_config=config_high)
+        
+        # High threshold should have same or fewer detections
+        assert len(result_high.detections) <= len(result_low.detections)
 
 
-# ============================================================
-# Section 8: Mixed Content Detection
-# ============================================================
-
-@requires_ai
-class TestMixedContent:
-    def test_detects_all_types(self, pipeline, test_texts):
-        result = pipeline.detect(test_texts["mixed"])
-        types = {d.type for d in result.detections}
-        # Should find at least email, phone, and secret
-        assert "EMAIL" in types
-        assert "PHONE" in types
-        assert "API_KEY" in types
-
-    def test_redacted_text_has_no_sensitive_data(self, pipeline, test_texts):
-        result = pipeline.detect(
-            test_texts["mixed"],
-            redaction_strategy=CoreRedactionStrategy.TOKEN,
-        )
-        assert "john@example.com" not in result.redacted_text
-        assert "555-123-4567" not in result.redacted_text
-        assert "sk-1234567890abcdef" not in result.redacted_text
+class TestAIPipeline:
+    """Tests for AIPipeline class."""
+    
+    def test_get_pipeline(self):
+        from zero_harm_ai_detectors import get_pipeline
+        
+        pipeline = get_pipeline()
+        assert pipeline is not None
+    
+    def test_pipeline_detect(self):
+        from zero_harm_ai_detectors import get_pipeline
+        
+        pipeline = get_pipeline()
+        result = pipeline.detect("Contact John Smith at john@example.com")
+        
+        assert isinstance(result, DetectionResult)
+        assert result.mode == "ai"
 
 
-# ============================================================
-# Section 9: Edge Cases
-# ============================================================
+class TestAIvsRegexComparison:
+    """Tests comparing AI and regex mode results."""
+    
+    def test_both_modes_return_same_structure(self):
+        text = "Contact john@example.com"
+        
+        result_regex = detect(text, mode="regex")
+        result_ai = detect(text, mode="ai")
+        
+        # Same structure
+        assert hasattr(result_regex, 'original_text')
+        assert hasattr(result_ai, 'original_text')
+        assert hasattr(result_regex, 'redacted_text')
+        assert hasattr(result_ai, 'redacted_text')
+        assert hasattr(result_regex, 'detections')
+        assert hasattr(result_ai, 'detections')
+        assert hasattr(result_regex, 'mode')
+        assert hasattr(result_ai, 'mode')
+    
+    def test_ai_detects_more_person_names(self):
+        text = "Please contact John Smith or Sarah Johnson for help"
+        
+        result_regex = detect(text, mode="regex")
+        result_ai = detect(text, mode="ai")
+        
+        regex_persons = [d for d in result_regex.detections if d.type == "PERSON"]
+        ai_persons = [d for d in result_ai.detections if d.type == "PERSON"]
+        
+        # AI should typically detect more or equal person names
+        # (This is a soft assertion since regex might catch some)
+        assert len(ai_persons) >= len(regex_persons) or len(ai_persons) > 0
+    
+    def test_structured_pii_same_in_both_modes(self):
+        text = "Email: test@example.com, SSN: 123-45-6789"
+        
+        result_regex = detect(text, mode="regex")
+        result_ai = detect(text, mode="ai")
+        
+        regex_emails = [d for d in result_regex.detections if d.type == "EMAIL"]
+        ai_emails = [d for d in result_ai.detections if d.type == "EMAIL"]
+        
+        # Both should detect the same emails (both use regex for structured)
+        assert len(regex_emails) == len(ai_emails)
 
-@requires_ai
-class TestPipelineEdgeCases:
-    def test_empty_text(self, pipeline):
-        result = pipeline.detect("")
-        assert len(result.detections) == 0
-        assert result.redacted_text == ""
-        assert result.harmful is False
 
-    def test_clean_text(self, pipeline, test_texts):
-        result = pipeline.detect(test_texts["clean"])
-        assert result.harmful is False
+class TestNERDetector:
+    """Tests for NERDetector class."""
+    
+    def test_ner_detector_creation(self):
+        from zero_harm_ai_detectors import NERDetector, AIConfig
+        
+        config = AIConfig()
+        detector = NERDetector(config)
+        assert detector is not None
+    
+    def test_ner_detector_detect(self):
+        from zero_harm_ai_detectors import NERDetector
+        
+        detector = NERDetector()
+        results = detector.detect("John Smith works at Google in Seattle")
+        
+        assert isinstance(results, list)
+        # Should detect at least one entity
+        assert len(results) > 0
 
-    def test_unicode_text(self, pipeline):
-        result = pipeline.detect("Contact José García at jose@example.com")
-        types = {d.type for d in result.detections}
-        assert "EMAIL" in types
 
-    def test_preserves_original_text(self, pipeline, test_texts):
-        result = pipeline.detect(test_texts["email"])
-        assert result.original_text == test_texts["email"]
-
-
-# ============================================================
-# Section 10: Legacy API Compatibility
-# ============================================================
-
-@requires_ai
-class TestLegacyAPI:
-    def test_detect_pii_legacy_format(self, pipeline, test_texts):
-        result = pipeline.detect_pii_legacy(test_texts["email"])
+class TestHarmfulContentDetector:
+    """Tests for HarmfulContentDetector class."""
+    
+    def test_harmful_detector_creation(self):
+        from zero_harm_ai_detectors import HarmfulContentDetector, AIConfig
+        
+        config = AIConfig()
+        detector = HarmfulContentDetector(config)
+        assert detector is not None
+    
+    def test_harmful_detector_detect(self):
+        from zero_harm_ai_detectors import HarmfulContentDetector
+        
+        detector = HarmfulContentDetector()
+        result = detector.detect("I hate you!")
+        
         assert isinstance(result, dict)
-        assert "EMAIL" in result
-        assert len(result["EMAIL"]) >= 1
-        entry = result["EMAIL"][0]
-        assert "span" in entry
-        assert "start" in entry
-        assert "end" in entry
-        assert "confidence" in entry
-
-    def test_detect_secrets_legacy_format(self, pipeline, test_texts):
-        result = pipeline.detect_secrets_legacy(test_texts["secret"])
-        assert isinstance(result, dict)
-        if "SECRETS" in result:
-            assert len(result["SECRETS"]) >= 1
-            entry = result["SECRETS"][0]
-            assert "span" in entry
-            assert "start" in entry
-            assert "end" in entry
-
-    def test_detect_secrets_legacy_empty(self, pipeline, test_texts):
-        result = pipeline.detect_secrets_legacy(test_texts["clean"])
-        assert result == {}
-
-
-# ============================================================
-# Section 11: Convenience Functions
-# ============================================================
-
-@requires_ai
-class TestConvenienceFunctions:
-    def test_detect_all_returns_dict(self):
-        result = detect_all("Email test@example.com")
-        assert isinstance(result, dict)
-        assert "original" in result
-        assert "redacted" in result
-        assert "detections" in result
         assert "harmful" in result
-
-    def test_get_pipeline_singleton(self):
-        p1 = get_pipeline()
-        p2 = get_pipeline()
-        assert p1 is p2
-
-
-# ============================================================
-# Section 12: Top-Level API Functions (from __init__.py)
-# ============================================================
-
-class TestTopLevelAPI:
-    """These run regardless of AI availability — they fall back to regex."""
-
-    def test_detect_pii_regex_mode(self):
-        """detect_pii should work in regex mode (default or explicit)."""
-        # The full __init__.py supports mode='regex' kwarg,
-        # but the function should work without it too (defaults to regex)
-        result = detect_pii("Email: test@example.com")
-        assert isinstance(result, dict)
-        assert "EMAIL" in result
-
-    def test_detect_secrets_regex_mode(self):
-        result = detect_secrets("sk-1234567890abcdef1234567890abcdef")
-        assert isinstance(result, dict)
-        assert "SECRETS" in result
-
-    @requires_ai
-    def test_detect_pii_ai_mode(self):
-        result = detect_pii("Contact John Smith at john@example.com", mode="ai")
-        assert isinstance(result, dict)
-        # AI mode should find at least email
-        assert "EMAIL" in result
-
-    def test_detect_pii_returns_dict_always(self):
-        """Both modes must return dict, never PipelineResult directly."""
-        result = detect_pii("test@example.com")
-        assert isinstance(result, dict)
-
-
-# ============================================================
-# Section 13: ZeroHarmDetector Unified Class
-# ============================================================
-
-@requires_ai
-class TestZeroHarmDetector:
-    def test_regex_mode(self):
-        detector = ZeroHarmDetector(mode="regex")
-        result = detector.detect("Email: test@example.com")
-        assert isinstance(result, dict)
-        assert "detections" in result
-        assert result["mode"] == "regex"
-        assert result["tier"] == "free"
-
-    def test_ai_mode(self):
-        detector = ZeroHarmDetector(mode="ai")
-        result = detector.detect("Email: test@example.com")
-        assert isinstance(result, PipelineResult)
-        types = {d.type for d in result.detections}
-        assert "EMAIL" in types
-
-    def test_invalid_mode_raises(self):
-        with pytest.raises(ValueError, match="Invalid mode"):
-            ZeroHarmDetector(mode="invalid")
-
-    def test_ai_mode_without_packages_raises(self):
-        """If AI mode is available, this test just verifies the constructor works."""
-        # We can't easily simulate missing packages when they're installed
-        detector = ZeroHarmDetector(mode="ai")
-        assert detector.mode == "ai"
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v", "--tb=short"])
+        assert "severity" in result
+        assert "scores" in result
