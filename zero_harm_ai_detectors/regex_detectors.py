@@ -13,12 +13,13 @@ so that detect_all_regex() doesn't pay the validation cost N times.
 
 File: zero_harm_ai_detectors/regex_detectors.py
 """
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Union
 
 from .core_patterns import (
     Detection,
     DetectionResult,
     DetectionType,
+    HarmfulResult,
     RedactionStrategy,
     EMAIL_RE,
     PHONE_RE,
@@ -118,9 +119,14 @@ def detect_secrets_regex(text: str) -> List[Detection]:
     return _detect_secrets_raw(text)
 
 
-def detect_harmful_regex(text: str) -> Dict[str, Any]:
+def detect_harmful_regex(text: str) -> HarmfulResult:
     """
-    Detect harmful content using regex patterns.
+    Classify harmful content using regex patterns.
+
+    Returns a HarmfulResult (not List[Detection]) because this is an
+    aggregate classification over the whole text, not a set of located spans.
+    Use detect_all_regex() or detect() if you want harmful info merged into a
+    DetectionResult alongside PII/secrets.
 
     Validates input before processing.
 
@@ -132,13 +138,15 @@ def detect_harmful_regex(text: str) -> Dict[str, Any]:
     - Any other match                        → 'low'
 
     Returns:
-        Dict with keys:
+        HarmfulResult with fields:
             harmful  (bool) — whether any harmful content was found
             severity (str)  — "none" | "low" | "medium" | "high"
             scores   (dict) — per-category normalised scores (0.0–1.0)
     """
     text = validate_input(text, REGEX_MODE_CONFIG)
     return _detect_harmful_raw(text)
+
+
 
 
 # ============================================================
@@ -152,7 +160,7 @@ def detect_all_regex(
     detect_pii: bool = True,
     detect_secrets: bool = True,
     detect_harmful: bool = True,
-    redaction_strategy: RedactionStrategy = RedactionStrategy.TOKEN,
+    redaction_strategy: "Union[str, RedactionStrategy]" = RedactionStrategy.TOKEN,
 ) -> DetectionResult:
     """
     Run all regex-based detections in a single pass.
@@ -166,6 +174,9 @@ def detect_all_regex(
         detect_secrets:     Whether to detect secrets/API keys.
         detect_harmful:     Whether to detect harmful content.
         redaction_strategy: How to replace detected content.
+                            Accepts either a RedactionStrategy enum or a
+                            plain string ("token", "mask_all", etc.).
+                            Unknown strings silently fall back to "token".
 
     Returns:
         DetectionResult containing all findings.
@@ -175,6 +186,7 @@ def detect_all_regex(
         InputTooLongError:    If text exceeds REGEX_MODE_CONFIG.max_length.
     """
     text = validate_input(text, REGEX_MODE_CONFIG)
+    strategy = RedactionStrategy.from_value(redaction_strategy)
 
     if not text:
         return DetectionResult(
@@ -207,9 +219,9 @@ def detect_all_regex(
 
     if detect_harmful:
         harmful_result = _detect_harmful_raw(text)
-        is_harmful = harmful_result["harmful"]
-        harmful_scores = harmful_result["scores"]
-        severity = harmful_result["severity"]
+        is_harmful = harmful_result.harmful
+        harmful_scores = harmful_result.scores
+        severity = harmful_result.severity
 
     # Deduplicate by (start, end, type)
     seen: set = set()
@@ -222,7 +234,7 @@ def detect_all_regex(
 
     return DetectionResult(
         original_text=text,
-        redacted_text=redact_spans(text, unique_detections, redaction_strategy),
+        redacted_text=redact_spans(text, unique_detections, strategy),
         detections=unique_detections,
         mode="regex",
         harmful=is_harmful,
@@ -362,7 +374,12 @@ def _detect_secrets_raw(text: str) -> List[Detection]:
     return detections
 
 
-def _detect_harmful_raw(text: str) -> Dict[str, Any]:
+def _detect_harmful_raw(text: str) -> HarmfulResult:
+    """
+    Internal raw harmful classifier — operates on pre-validated text.
+
+    Returns HarmfulResult (not a dict) for type-safe consumption by callers.
+    """
     counts: Dict[str, int] = {
         cat: len(pattern.findall(text))
         for cat, pattern in HARMFUL_PATTERNS.items()
@@ -370,7 +387,7 @@ def _detect_harmful_raw(text: str) -> Dict[str, Any]:
     total_matches = sum(counts.values())
 
     if total_matches == 0:
-        return {"harmful": False, "severity": "none", "scores": {}}
+        return HarmfulResult(harmful=False, severity="none", scores={})
 
     if counts.get("identity_hate", 0) > 0 or counts.get("threat_phrases", 0) > 0:
         severity = "high"
@@ -392,4 +409,4 @@ def _detect_harmful_raw(text: str) -> Dict[str, Any]:
         for cat, count in counts.items()
         if count > 0
     }
-    return {"harmful": True, "severity": severity, "scores": scores}
+    return HarmfulResult(harmful=True, severity=severity, scores=scores)

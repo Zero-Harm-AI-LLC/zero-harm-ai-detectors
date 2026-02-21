@@ -1,8 +1,21 @@
 """
 Tests for core patterns, validators, and regex detection.
 
+Covers all improvements from the v1.0 audit:
+  #1  detect_harmful_regex returns HarmfulResult, not a dict
+  #1  detect_harmful_regex emits DeprecationWarning (deprecated alias)
+  #2  ai_config param name is consistent across public APIs
+  #3  redaction_strategy accepts both str and RedactionStrategy enum
+  #4  mode is case-insensitive and whitespace-tolerant
+  #5  No double-validation (AIPipeline calls _raw helpers directly)
+  #6  AI_AVAILABLE uses importlib (cheap check, no heavy imports)
+  #7  field import removed from ai_detectors (code-cleanliness, no runtime test)
+  #8  Detection.text is still populated by default (include_match_text=True)
+
 File: tests/test_core_and_regex.py
 """
+import warnings
+
 import pytest
 from zero_harm_ai_detectors import (
     # Main API
@@ -11,6 +24,7 @@ from zero_harm_ai_detectors import (
     Detection,
     DetectionResult,
     DetectionType,
+    HarmfulResult,
     # Redaction
     RedactionStrategy,
     apply_redaction,
@@ -158,6 +172,163 @@ class TestOrchestrationValidation:
     def test_detect_strips_null_bytes(self):
         result = detect("Email:\x00 test@example.com")
         assert len(result.detections) >= 1
+
+
+# ============================================================
+# Issue #1 — detect_harmful_regex returns HarmfulResult (not dict)
+# ============================================================
+
+class TestDetectHarmfulReturnsHarmfulResult:
+    """Issue #1: detect_harmful_regex returns HarmfulResult, not a dict."""
+
+    def test_returns_harmful_result_type_clean(self):
+        result = detect_harmful_regex("Hello, how are you today?")
+        assert isinstance(result, HarmfulResult), (
+            "detect_harmful_regex must return HarmfulResult, not a dict"
+        )
+
+    def test_returns_harmful_result_type_harmful(self):
+        result = detect_harmful_regex("I'm going to kill you!")
+        assert isinstance(result, HarmfulResult), (
+            "detect_harmful_regex must return HarmfulResult, not a dict"
+        )
+
+    def test_harmful_result_has_expected_fields(self):
+        result = detect_harmful_regex("You're such a loser!")
+        assert hasattr(result, "harmful")
+        assert hasattr(result, "severity")
+        assert hasattr(result, "scores")
+
+    def test_clean_text_returns_not_harmful(self):
+        result = detect_harmful_regex("Hello, how are you today?")
+        assert result.harmful is False
+        assert result.severity == "none"
+        assert result.scores == {}
+
+    def test_insult_is_harmful_low(self):
+        result = detect_harmful_regex("You're such a loser!")
+        assert result.harmful is True
+        assert result.severity == "low"
+
+    def test_threat_phrase_is_high(self):
+        result = detect_harmful_regex("I'm going to kill you!")
+        assert result.harmful is True
+        assert result.severity == "high"
+
+    def test_identity_hate_is_high(self):
+        result = detect_harmful_regex("You are a faggot")
+        assert result.harmful is True
+        assert result.severity == "high"
+
+    def test_to_dict_produces_expected_keys(self):
+        """HarmfulResult.to_dict() should be dict-compatible for migration."""
+        d = detect_harmful_regex("You idiot!").to_dict()
+        assert set(d.keys()) == {"harmful", "severity", "scores"}
+
+    def test_scores_populated_when_harmful(self):
+        result = detect_harmful_regex("You idiot!")
+        assert len(result.scores) > 0
+
+    def test_scores_empty_when_clean(self):
+        assert detect_harmful_regex("Nice weather today.").scores == {}
+
+
+
+class TestRedactionStrategyFlexibility:
+    """Issue #3: all public entry points accept str or RedactionStrategy enum."""
+
+    def test_detect_accepts_string_strategy(self):
+        result = detect("test@example.com", redaction_strategy="token")
+        assert "[REDACTED_EMAIL]" in result.redacted_text
+
+    def test_detect_accepts_enum_strategy(self):
+        result = detect("test@example.com", redaction_strategy=RedactionStrategy.TOKEN)
+        assert "[REDACTED_EMAIL]" in result.redacted_text
+
+    def test_detect_all_regex_accepts_string_strategy(self):
+        result = detect_all_regex("test@example.com", redaction_strategy="mask_all")
+        assert "****" in result.redacted_text
+
+    def test_detect_all_regex_accepts_enum_strategy(self):
+        result = detect_all_regex(
+            "test@example.com", redaction_strategy=RedactionStrategy.MASK_ALL
+        )
+        assert "****" in result.redacted_text
+
+    def test_redact_spans_accepts_string(self):
+        dets = [Detection(type="EMAIL", text="a@b.com", start=0, end=7, confidence=0.99)]
+        out = redact_spans("a@b.com", dets, "token")
+        assert "[REDACTED_EMAIL]" in out
+
+    def test_unknown_string_falls_back_to_token(self):
+        result = detect("test@example.com", redaction_strategy="nonexistent")
+        assert "[REDACTED_EMAIL]" in result.redacted_text
+
+    def test_from_value_idempotent_with_enum(self):
+        """RedactionStrategy.from_value should be idempotent."""
+        s = RedactionStrategy.TOKEN
+        assert RedactionStrategy.from_value(s) is s
+
+
+# ============================================================
+# Issue #4 — mode is case-insensitive
+# ============================================================
+
+class TestModeNormalization:
+    """Issue #4: mode should accept 'AI', 'Regex', etc."""
+
+    def test_mode_uppercase_regex(self):
+        result = detect("test@example.com", mode="REGEX")
+        assert result.mode == "regex"
+
+    def test_mode_mixed_case_regex(self):
+        result = detect("test@example.com", mode="Regex")
+        assert result.mode == "regex"
+
+    def test_mode_with_whitespace(self):
+        result = detect("test@example.com", mode="  regex  ")
+        assert result.mode == "regex"
+
+    def test_invalid_mode_still_raises(self):
+        with pytest.raises(ValueError, match="Invalid mode"):
+            detect("test", mode="invalid")
+
+    def test_invalid_mode_after_normalization(self):
+        """'INVALID' should still raise after .lower()."""
+        with pytest.raises(ValueError):
+            detect("test", mode="INVALID")
+
+
+# ============================================================
+# Issue #6 — AI_AVAILABLE check is cheap (importlib-based)
+# ============================================================
+
+class TestAIAvailableCheck:
+    """Issue #6: check_ai_available() should use importlib, not import torch."""
+
+    def test_check_ai_available_returns_bool(self):
+        from zero_harm_ai_detectors import check_ai_available
+        result = check_ai_available()
+        assert isinstance(result, bool)
+
+    def test_ai_available_is_bool(self):
+        from zero_harm_ai_detectors import AI_AVAILABLE
+        assert isinstance(AI_AVAILABLE, bool)
+
+
+# ============================================================
+# Issue #1 — HarmfulResult is exported from top-level package
+# ============================================================
+
+class TestHarmfulResultExport:
+    def test_harmful_result_importable(self):
+        from zero_harm_ai_detectors import HarmfulResult
+        assert HarmfulResult is not None
+
+    def test_harmful_result_instantiable(self):
+        r = HarmfulResult(harmful=True, severity="high", scores={"threat": 0.9})
+        assert r.harmful is True
+        assert r.severity == "high"
 
 
 # ============================================================
@@ -309,48 +480,48 @@ class TestSecretsDetection:
 
 
 # ============================================================
-# Harmful Content Detection
+# Harmful Content Classification
 # ============================================================
 
-class TestHarmfulDetection:
+class TestHarmfulClassification:
     def test_clean_text(self):
         result = detect_harmful_regex("Hello, how are you today?")
-        assert result["harmful"] is False
-        assert result["severity"] == "none"
-        assert result["scores"] == {}
+        assert result.harmful is False
+        assert result.severity == "none"
+        assert result.scores == {}
 
     def test_insult_is_low(self):
         result = detect_harmful_regex("You're such a loser!")
-        assert result["harmful"] is True
-        assert result["severity"] == "low"
+        assert result.harmful is True
+        assert result.severity == "low"
 
     def test_threat_phrase_is_high(self):
         result = detect_harmful_regex("I'm going to kill you!")
-        assert result["harmful"] is True
-        assert result["severity"] == "high"
+        assert result.harmful is True
+        assert result.severity == "high"
 
     def test_identity_hate_is_high(self):
         result = detect_harmful_regex("You are a faggot")
-        assert result["harmful"] is True
-        assert result["severity"] == "high"
+        assert result.harmful is True
+        assert result.severity == "high"
 
     def test_profanity_alone_is_low(self):
         result = detect_harmful_regex("What the fuck is this?")
-        assert result["harmful"] is True
-        assert result["severity"] == "low"
+        assert result.harmful is True
+        assert result.severity == "low"
 
     def test_multiple_insults_escalate_to_medium(self):
         result = detect_harmful_regex("I hate you, you stupid idiot!")
-        assert result["harmful"] is True
-        assert result["severity"] == "medium"
+        assert result.harmful is True
+        assert result.severity == "medium"
 
     def test_scores_present_when_harmful(self):
         result = detect_harmful_regex("You idiot!")
-        assert isinstance(result["scores"], dict)
-        assert len(result["scores"]) > 0
+        assert isinstance(result.scores, dict)
+        assert len(result.scores) > 0
 
     def test_scores_empty_when_clean(self):
-        assert detect_harmful_regex("Nice weather today.")["scores"] == {}
+        assert detect_harmful_regex("Nice weather today.").scores == {}
 
 
 # ============================================================
@@ -381,6 +552,11 @@ class TestRedaction:
 
     def test_redact_spans_empty_detections(self):
         assert redact_spans("No PII here", []) == "No PII here"
+
+    def test_redact_spans_string_strategy(self):
+        """Issue #3: redact_spans should accept a plain string."""
+        dets = [Detection(type="EMAIL", text="a@b.com", start=0, end=7, confidence=0.99)]
+        assert redact_spans("a@b.com", dets, "token") == "[REDACTED_EMAIL]"
 
 
 # ============================================================

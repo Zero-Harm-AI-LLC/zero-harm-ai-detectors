@@ -18,7 +18,7 @@ Usage:
 
 File: zero_harm_ai_detectors/__init__.py
 """
-from typing import Optional
+from typing import Optional, Union
 
 # ============================================================
 # Core Exports (always available)
@@ -29,6 +29,7 @@ from .core_patterns import (
     Detection,
     DetectionResult,
     DetectionType,
+    HarmfulResult,
     # Redaction
     RedactionStrategy,
     apply_redaction,
@@ -74,7 +75,7 @@ from .regex_detectors import (
     detect_addresses,
     detect_person_names_regex,
     detect_secrets_regex,
-    detect_harmful_regex,
+    detect_harmful_regex,  # returns HarmfulResult
 )
 
 # ============================================================
@@ -113,20 +114,24 @@ def detect(
     detect_pii: bool = True,
     detect_secrets: bool = True,
     detect_harmful: bool = True,
-    redaction_strategy: str = "token",
+    redaction_strategy: "Union[str, RedactionStrategy]" = "token",
     ai_config: Optional["AIConfig"] = None,
 ) -> DetectionResult:
     """
     Unified detection function - main entry point for the library.
 
     Args:
-        text: Input text to scan
-        mode: "regex" (fast, pattern-based) or "ai" (slower, transformer-based)
-        detect_pii: Whether to detect PII
-        detect_secrets: Whether to detect secrets/API keys
-        detect_harmful: Whether to detect harmful content
-        redaction_strategy: "token", "mask_all", "mask_last4", or "hash"
-        ai_config: Optional AIConfig for AI mode customization
+        text: Input text to scan.
+        mode: "regex" (fast, pattern-based) or "ai" (slower, transformer-based).
+              Case-insensitive; leading/trailing whitespace is stripped.
+        detect_pii: Whether to detect PII.
+        detect_secrets: Whether to detect secrets/API keys.
+        detect_harmful: Whether to detect harmful content.
+        redaction_strategy: "token", "mask_all", "mask_last4", or "hash".
+                            Accepts either a plain string or a RedactionStrategy
+                            enum value.  Unknown strings silently fall back to
+                            "token".
+        ai_config: Optional AIConfig for AI mode customization.
 
     Returns:
         DetectionResult with:
@@ -139,9 +144,13 @@ def detect(
             severity (str)        - "none" | "low" | "medium" | "high"
 
     Raises:
-        ValueError: If mode is not "regex" or "ai"
-        ImportError: If mode="ai" but AI dependencies are not installed
+        ValueError:   If mode is not "regex" or "ai" (after normalization).
+        ImportError:  If mode="ai" but AI dependencies are not installed.
+        InputValidationError: If text is None or looks like binary data.
+        InputTooLongError:    If text exceeds the mode's max_length limit.
     """
+    # Normalize mode: strip whitespace, lowercase — prevents "AI" / " regex " failures
+    mode = mode.strip().lower()
     if mode not in ("regex", "ai"):
         raise ValueError(f"Invalid mode: {mode!r}. Must be 'regex' or 'ai'.")
 
@@ -151,10 +160,8 @@ def detect(
     _config = AI_MODE_CONFIG if mode == "ai" else REGEX_MODE_CONFIG
     text = validate_input(text, _config)
 
-    try:
-        strategy = RedactionStrategy(redaction_strategy)
-    except ValueError:
-        strategy = RedactionStrategy.TOKEN
+    # Normalize redaction_strategy once here so both branches receive the enum
+    strategy = RedactionStrategy.from_value(redaction_strategy)
 
     if mode == "ai":
         if not AI_AVAILABLE:
@@ -203,6 +210,7 @@ __all__ = [
     "Detection",
     "DetectionResult",
     "DetectionType",
+    "HarmfulResult",
 
     # Redaction
     "RedactionStrategy",
@@ -238,6 +246,8 @@ __all__ = [
     "AIPipeline",
     "detect_all_ai",
     "get_pipeline",
+    "NERDetector",
+    "HarmfulContentDetector",
 
     # Utilities
     "luhn_check",

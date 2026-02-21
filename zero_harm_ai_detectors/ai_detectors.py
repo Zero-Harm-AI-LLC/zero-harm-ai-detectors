@@ -10,19 +10,23 @@ Uses transformer models for improved accuracy on:
 Structured data (email, phone, SSN, secrets) still uses regex (95%+ accuracy).
 
 Every public method validates its input before processing.
+Internal _*_raw helpers skip re-validation when the caller already validated.
 
 Requirements:
     pip install zero_harm_ai_detectors[ai]
 
 File: zero_harm_ai_detectors/ai_detectors.py
 """
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+import importlib.util
+import logging
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Union
 
 from .core_patterns import (
     Detection,
     DetectionResult,
     DetectionType,
+    HarmfulResult,
     RedactionStrategy,
     redact_spans,
 )
@@ -40,22 +44,28 @@ from .regex_detectors import (
     _detect_secrets_raw,
 )
 
+logger = logging.getLogger(__name__)
+
 
 # ============================================================
-# Availability check
+# Availability check — uses importlib.util so we never pay the
+# cost of importing torch/transformers just to check presence.
 # ============================================================
 
 def check_ai_available() -> bool:
-    """Check if AI dependencies are installed."""
-    try:
-        import torch
-        import transformers
-        return True
-    except ImportError:
-        return False
+    """
+    Check if AI dependencies are installed without importing them.
+
+    Uses importlib.util.find_spec() so the check is cheap (~0.1ms)
+    regardless of whether the packages are installed.
+    """
+    return (
+        importlib.util.find_spec("torch") is not None
+        and importlib.util.find_spec("transformers") is not None
+    )
 
 
-AI_AVAILABLE = check_ai_available()
+AI_AVAILABLE: bool = check_ai_available()
 
 
 # ============================================================
@@ -118,9 +128,18 @@ class NERDetector:
         """
         Detect named entities in text.
 
-        Validates input before processing.
+        Validates input then delegates to _detect_raw().
         """
         text = validate_input(text, AI_MODE_CONFIG)
+        return self._detect_raw(text)
+
+    def _detect_raw(self, text: str) -> List[Detection]:
+        """
+        Detect named entities on pre-validated text.
+
+        Called by AIPipeline.detect() which has already validated the input,
+        so we avoid paying the validation cost a second time.
+        """
         if not text.strip():
             return []
 
@@ -139,8 +158,8 @@ class NERDetector:
                         confidence=entity["score"],
                         metadata={"method": "ai_ner", "model": self.config.ner_model},
                     ))
-        except Exception:
-            pass  # Degrade gracefully; caller gets an empty list
+        except Exception as exc:
+            logger.debug("NERDetector._detect_raw failed: %s", exc)
 
         return detections
 
@@ -174,18 +193,48 @@ class HarmfulContentDetector:
             )
         return self._pipeline
 
-    def detect(self, text: str) -> Dict[str, Any]:
+    def classify(self, text: str) -> HarmfulResult:
         """
-        Detect harmful content in text.
+        Classify harmful content in text.
 
-        Validates input before processing.
+        Returns a HarmfulResult (not a dict and not List[Detection]) because
+        this is an aggregate classification, not a set of located spans.
+        Validates input then delegates to _classify_raw().
 
         Returns:
-            Dict with keys: harmful (bool), severity (str), scores (dict)
+            HarmfulResult with fields: harmful (bool), severity (str), scores (dict)
         """
         text = validate_input(text, AI_MODE_CONFIG)
+        return self._classify_raw(text)
+
+    # ---------------------------------------------------------------------------
+    # Deprecated alias — kept for one release cycle so existing callers don't
+    # silently break.  Remove in v2.0.
+    # ---------------------------------------------------------------------------
+    def detect(self, text: str) -> Dict[str, Any]:
+        """
+        Deprecated: use classify() instead.
+
+        Returns a plain dict for backward compatibility.
+        Will be removed in a future release.
+        """
+        import warnings
+        warnings.warn(
+            "HarmfulContentDetector.detect() is deprecated. "
+            "Use HarmfulContentDetector.classify() which returns a HarmfulResult.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.classify(text).to_dict()
+
+    def _classify_raw(self, text: str) -> HarmfulResult:
+        """
+        Classify harmful content on pre-validated text.
+
+        Called by AIPipeline.detect() which has already validated the input.
+        """
         if not text.strip():
-            return {"harmful": False, "severity": "none", "scores": {}}
+            return HarmfulResult(harmful=False, severity="none", scores={})
 
         try:
             results = self.pipeline(text[: self.config.max_length])
@@ -212,10 +261,11 @@ class HarmfulContentDetector:
             else:
                 severity = "none"
 
-            return {"harmful": is_harmful, "severity": severity, "scores": scores}
+            return HarmfulResult(harmful=is_harmful, severity=severity, scores=scores)
 
-        except Exception:
-            return {"harmful": False, "severity": "none", "scores": {}}
+        except Exception as exc:
+            logger.debug("HarmfulContentDetector._classify_raw failed: %s", exc)
+            return HarmfulResult(harmful=False, severity="none", scores={})
 
 
 # ============================================================
@@ -229,12 +279,12 @@ class AIPipeline:
     Uses AI for: person names, locations, organisations, harmful content.
     Uses regex for: email, phone, SSN, credit card, secrets (95%+ accuracy).
 
-    Input is validated once at the top of detect(); individual components
-    receive the already-validated string.
+    Input is validated once at the top of detect(); sub-components receive
+    pre-validated text via internal _*_raw methods to avoid re-validation.
     """
 
-    def __init__(self, config: Optional[AIConfig] = None):
-        self.config = config or AIConfig()
+    def __init__(self, ai_config: Optional[AIConfig] = None):
+        self.config = ai_config or AIConfig()
         self._ner_detector: Optional[NERDetector] = None
         self._harmful_detector: Optional[HarmfulContentDetector] = None
 
@@ -270,12 +320,13 @@ class AIPipeline:
         detect_pii: bool = True,
         detect_secrets: bool = True,
         detect_harmful: bool = True,
-        redaction_strategy: RedactionStrategy = RedactionStrategy.TOKEN,
+        redaction_strategy: "Union[str, RedactionStrategy]" = RedactionStrategy.TOKEN,
     ) -> DetectionResult:
         """
         Run full AI-enhanced detection.
 
-        Validates input at entry; sub-components receive pre-validated text.
+        Validates input once at entry; sub-components receive pre-validated
+        text through internal _*_raw methods, avoiding duplicate validation.
 
         Args:
             text:               Input text to scan.
@@ -283,6 +334,8 @@ class AIPipeline:
             detect_secrets:     Whether to detect secrets/API keys.
             detect_harmful:     Whether to detect harmful content.
             redaction_strategy: How to replace detected content.
+                                Accepts either a RedactionStrategy enum or a
+                                plain string ("token", "mask_all", etc.).
 
         Returns:
             DetectionResult with all findings.
@@ -292,6 +345,7 @@ class AIPipeline:
             InputTooLongError:    If text exceeds AI_MODE_CONFIG.max_length.
         """
         text = validate_input(text, AI_MODE_CONFIG)
+        strategy = RedactionStrategy.from_value(redaction_strategy)
 
         if not text:
             return DetectionResult(
@@ -305,21 +359,16 @@ class AIPipeline:
 
         if detect_pii:
             all_detections.extend(self._detect_structured_pii(text))
-            # NER detector validates internally but receives already-clean text
-            all_detections.extend(self.ner_detector.detect(text))
+            # NER uses _detect_raw (pre-validated) to avoid double-validation
+            all_detections.extend(self.ner_detector._detect_raw(text))
 
         if detect_secrets:
             all_detections.extend(_detect_secrets_raw(text))
 
-        is_harmful = False
-        harmful_scores: Dict[str, float] = {}
-        severity = "none"
-
+        harmful_result = HarmfulResult(harmful=False, severity="none", scores={})
         if detect_harmful:
-            harmful_result = self.harmful_detector.detect(text)
-            is_harmful = harmful_result["harmful"]
-            harmful_scores = harmful_result["scores"]
-            severity = harmful_result["severity"]
+            # harmful detector uses _classify_raw (pre-validated)
+            harmful_result = self.harmful_detector._classify_raw(text)
 
         # Deduplicate
         seen: set = set()
@@ -332,12 +381,12 @@ class AIPipeline:
 
         return DetectionResult(
             original_text=text,
-            redacted_text=redact_spans(text, unique_detections, redaction_strategy),
+            redacted_text=redact_spans(text, unique_detections, strategy),
             detections=unique_detections,
             mode="ai",
-            harmful=is_harmful,
-            harmful_scores=harmful_scores,
-            severity=severity,
+            harmful=harmful_result.harmful,
+            harmful_scores=harmful_result.scores,
+            severity=harmful_result.severity,
         )
 
 
@@ -348,11 +397,17 @@ class AIPipeline:
 _default_pipeline: Optional[AIPipeline] = None
 
 
-def get_pipeline(config: Optional[AIConfig] = None) -> AIPipeline:
-    """Return (or create) the shared default AIPipeline."""
+def get_pipeline(ai_config: Optional[AIConfig] = None) -> AIPipeline:
+    """
+    Return (or create) the shared default AIPipeline.
+
+    Args:
+        ai_config: Optional AIConfig. If provided, a fresh pipeline is
+                   created with the given config (not cached).
+    """
     global _default_pipeline
-    if config is not None:
-        return AIPipeline(config)
+    if ai_config is not None:
+        return AIPipeline(ai_config)
     if _default_pipeline is None:
         _default_pipeline = AIPipeline()
     return _default_pipeline
@@ -363,8 +418,8 @@ def detect_all_ai(
     detect_pii: bool = True,
     detect_secrets: bool = True,
     detect_harmful: bool = True,
-    redaction_strategy: RedactionStrategy = RedactionStrategy.TOKEN,
-    config: Optional[AIConfig] = None,
+    redaction_strategy: "Union[str, RedactionStrategy]" = RedactionStrategy.TOKEN,
+    ai_config: Optional[AIConfig] = None,
 ) -> DetectionResult:
     """
     Convenience function for AI detection.
@@ -376,13 +431,13 @@ def detect_all_ai(
         detect_pii:         Whether to detect PII.
         detect_secrets:     Whether to detect secrets/API keys.
         detect_harmful:     Whether to detect harmful content.
-        redaction_strategy: Redaction strategy.
-        config:             Optional AIConfig.
+        redaction_strategy: Redaction strategy (str or RedactionStrategy enum).
+        ai_config:          Optional AIConfig.
 
     Returns:
         DetectionResult
     """
-    pipeline = get_pipeline(config)
+    pipeline = get_pipeline(ai_config)
     return pipeline.detect(
         text,
         detect_pii=detect_pii,

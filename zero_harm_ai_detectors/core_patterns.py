@@ -5,6 +5,7 @@ This module contains:
 - Regex patterns for structured data detection
 - Validators (Luhn, entropy)
 - Detection and DetectionResult dataclasses
+- HarmfulResult dataclass (distinct from List[Detection] for clarity)
 - Redaction utilities
 
 File: zero_harm_ai_detectors/core_patterns.py
@@ -49,6 +50,21 @@ class RedactionStrategy(Enum):
     MASK_LAST4 = "mask_last4"   # ****1234
     HASH = "hash"               # [HASH:a1b2c3...]
     TOKEN = "token"             # [REDACTED_EMAIL]
+
+    @classmethod
+    def from_value(cls, value: "str | RedactionStrategy") -> "RedactionStrategy":
+        """
+        Accept either a RedactionStrategy enum or a plain string.
+
+        Unknown strings silently fall back to TOKEN so existing callers
+        (and the unified detect() API) don't break on typos.
+        """
+        if isinstance(value, cls):
+            return value
+        try:
+            return cls(value)
+        except ValueError:
+            return cls.TOKEN
 
 
 # ============================================================
@@ -332,6 +348,31 @@ class Detection:
 
 
 @dataclass
+class HarmfulResult:
+    """
+    Result from detect_harmful_regex() / HarmfulContentDetector.classify().
+
+    Kept as its own type (not List[Detection]) because it represents an
+    aggregate classification over the whole text rather than a set of
+    located spans.  Callers that previously called detect_harmful_regex()
+    or HarmfulContentDetector.detect() should migrate to the renamed
+    detect_harmful_regex() / HarmfulContentDetector.classify().
+
+    The dict-compatible to_dict() method eases migration.
+    """
+    harmful: bool
+    severity: str           # "none" | "low" | "medium" | "high"
+    scores: Dict[str, float]  # per-category scores
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "harmful": self.harmful,
+            "severity": self.severity,
+            "scores": self.scores,
+        }
+
+
+@dataclass
 class DetectionResult:
     """Unified result from detection - identical structure for both modes."""
     original_text: str
@@ -358,6 +399,17 @@ class DetectionResult:
             "mode": self.mode,
             "harmful": self.harmful,
             "harmful_scores": self.harmful_scores,
+            "severity": self.severity,
+        }
+
+    def to_legacy_dict(self) -> Dict[str, Any]:
+        """Backward-compatible dict with flat detections list."""
+        return {
+            "original": self.original_text,
+            "redacted": self.redacted_text,
+            "detections": [d.to_dict() for d in self.detections],
+            "mode": self.mode,
+            "harmful": self.harmful,
             "severity": self.severity,
         }
 
@@ -405,17 +457,20 @@ def apply_redaction(
 def redact_spans(
     text: str,
     detections: List[Detection],
-    strategy: RedactionStrategy = RedactionStrategy.TOKEN,
+    strategy: "str | RedactionStrategy" = RedactionStrategy.TOKEN,
 ) -> str:
     """
     Redact all detected spans in text.
 
     Validates text input before processing.
+    Accepts either a RedactionStrategy enum or a plain string.
     """
     from .input_validation import validate_input, REGEX_MODE_CONFIG
     text = validate_input(text, REGEX_MODE_CONFIG)
     if not detections:
         return text
+
+    strategy = RedactionStrategy.from_value(strategy)
 
     # Sort by start position (descending) to replace from end
     sorted_detections = sorted(detections, key=lambda d: d.start, reverse=True)
